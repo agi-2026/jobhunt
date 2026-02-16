@@ -6,6 +6,7 @@ Usage:
   python3 scripts/queue-summary.py                  # Top 10 PENDING jobs (1-line each)
   python3 scripts/queue-summary.py --top 5           # Top 5
   python3 scripts/queue-summary.py --actionable      # Top 10, skip NO-AUTO entries
+  python3 scripts/queue-summary.py --ats ashby        # Filter by ATS type (ashby|greenhouse|lever|other)
   python3 scripts/queue-summary.py --section pending  # Specific section
   python3 scripts/queue-summary.py --stats            # Just stats
 
@@ -138,6 +139,7 @@ def main():
     section = 'pending'
     stats_only = False
     actionable_only = False
+    ats_filter = None
 
     i = 0
     while i < len(args):
@@ -146,6 +148,9 @@ def main():
             i += 2
         elif args[i] == '--section' and i + 1 < len(args):
             section = args[i + 1]
+            i += 2
+        elif args[i] == '--ats' and i + 1 < len(args):
+            ats_filter = args[i + 1].lower()
             i += 2
         elif args[i] == '--stats':
             stats_only = True
@@ -175,6 +180,19 @@ def main():
 
     if actionable_only:
         jobs = [j for j in jobs if not j.get('no_auto')]
+
+    if ats_filter:
+        ATS_PATTERNS = {
+            'ashby': ['ashbyhq.com'],
+            'greenhouse': ['greenhouse.io'],
+            'lever': ['lever.co'],
+        }
+        patterns = ATS_PATTERNS.get(ats_filter)
+        if patterns:
+            jobs = [j for j in jobs if any(p in j.get('url', '') for p in patterns)]
+        elif ats_filter == 'other':
+            all_known = ['ashbyhq.com', 'greenhouse.io', 'lever.co']
+            jobs = [j for j in jobs if not any(p in j.get('url', '') for p in all_known)]
 
     for job in jobs[:top_n]:
         print(format_job_line(job))
