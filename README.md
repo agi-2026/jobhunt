@@ -9,13 +9,13 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 │                    JobHunt Agent Architecture                 │
 │                                                               │
 │  ┌──────────────┐     job-queue.md      ┌───────────────────┐ │
-│  │ Search Agent │ ──── (priority) ────▶│ Application Agent  │ │
-│  │  (Producer)  │     sorted queue     │   (Consumer)       │ │
+│  │ Search Agent │ ──── (priority) ────▶ │ Application Agent │ │
+│  │  (Producer)  │     sorted queue      │   (Consumer)      │ │
 │  │              │                       │                   │ │
-│  │ • Greenhouse │                      │ • Form Filler      │ │
-│  │ • HN Hiring  │                      │ • Resume Upload    │ │
-│  │ • Brave API  │                      │ • Essay Writer     │ │
-│  │ • Browser    │                      │ • Submit + Log     │ │
+│  │ • Greenhouse │                       │ • Form Filler     │ │
+│  │ • HN Hiring  │                       │ • Resume Upload   │ │
+│  │ • Brave API  │                       │ • Essay Writer    │ │
+│  │ • Browser    │                       │ • Submit + Log    │ │
 │  └──────────────┘                       └───────────────────┘ │
 │        │                                         │            │
 │        │          ┌──────────────┐               │            │
