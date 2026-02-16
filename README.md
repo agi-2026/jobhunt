@@ -5,24 +5,24 @@ An open-source, fully autonomous job search agent that discovers jobs, applies t
 Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    JobHunt Agent Architecture                    │
-│                                                                 │
-│  ┌──────────────┐     job-queue.md      ┌───────────────────┐  │
-│  │ Search Agent  │ ──── (priority) ────▶ │ Application Agent │  │
-│  │  (Producer)   │     sorted queue      │   (Consumer)      │  │
-│  │              │                        │                   │  │
-│  │ • Greenhouse  │                        │ • Form Filler     │  │
-│  │ • HN Hiring   │                        │ • Resume Upload   │  │
-│  │ • Brave API   │                        │ • Essay Writer    │  │
-│  │ • Browser     │                        │ • Submit + Log    │  │
-│  └──────────────┘                        └───────────────────┘  │
-│        │                                         │              │
-│        │          ┌──────────────┐                │              │
-│        └─────────▶│  Dashboard   │◀──────────────┘              │
-│                   │  :8765       │                               │
-│                   └──────┬───────┘                               │
-│                          │                                      │
+┌───────────────────────────────────────────────────────────────┐
+│                    JobHunt Agent Architecture                 │
+│                                                               │
+│  ┌──────────────┐     job-queue.md      ┌───────────────────┐ │
+│  │ Search Agent  │ ──── (priority) ────▶│ Application Agent │ │
+│  │  (Producer)   │     sorted queue     │   (Consumer)      │ │
+│  │              │                       │                   │ │
+│  │ • Greenhouse  │                      │ • Form Filler     │ │
+│  │ • HN Hiring   │                      │ • Resume Upload   │ │
+│  │ • Brave API   │                      │ • Essay Writer    │ │
+│  │ • Browser     │                      │ • Submit + Log    │ │
+│  └──────────────┘                       └───────────────────┘ │
+│        │                                         │            │
+│        │          ┌──────────────┐               │            │
+│        └─────────▶│  Dashboard   │◀──────────────┘            │
+│                   │  :8765       │                            │
+│                   └──────┬───────┘                            │
+│                          │                                    │
 │  ┌──────────────┐  ┌────┴─────┐  ┌──────────────┐             │
 │  │Email Monitor │  │ Evening  │  │Health Monitor│             │
 │  │  (2h cycle)  │  │ Summary  │  │ (30m cycle)  │             │
@@ -30,13 +30,13 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 │  │ Detect reply │  │ Pipeline │  │ Error alerts │             │
 │  │ Update stage │  │ report   │  │ Stuck agents │             │
 │  └──────────────┘  └──────────┘  └──────────────┘             │
-│                                                                 │
+│                                                               │
 │  ┌──────────────┐                   ┌─────────┐               │
 │  │Analysis Agent│                   │WhatsApp │               │
 │  │ (daily 8:30) │──────────────────▶│ (you)   │               │
 │  │ Log analysis │                   └─────────┘               │
-│  └──────────────┘                                              │
-└─────────────────────────────────────────────────────────────────┘
+│  └──────────────┘                                             │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## What It Does
