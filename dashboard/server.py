@@ -28,7 +28,7 @@ OPT_EXPIRY = datetime(2026, 5, 31)
 
 def parse_queue(content: str) -> dict:
     """Parse job-queue.md into structured sections."""
-    sections = {"pending": [], "in_progress": [], "completed": [], "skipped": []}
+    sections = {"pending": [], "manual_apply": [], "in_progress": [], "completed": [], "skipped": []}
     stats_line = ""
     current_section = None
     current_job = None
@@ -55,8 +55,8 @@ def parse_queue(content: str) -> dict:
                 current_section = None
             continue
 
-        # Capture DO NOT AUTO-APPLY jobs as pending with a flag
-        if "DO NOT AUTO-APPLY" in stripped:
+        # Capture DO NOT AUTO-APPLY section header (must start with ##)
+        if stripped.startswith("## ") and "DO NOT AUTO-APPLY" in stripped:
             current_section = "pending_no_auto"
             continue
 
@@ -68,7 +68,8 @@ def parse_queue(content: str) -> dict:
         score_match = re.match(r"^###\s+\[(\d+)\]\s+(.+?)\s*—\s*(.+)$", stripped)
         if score_match:
             if current_job:
-                sections[current_job["_section"]].append(current_job)
+                target = "manual_apply" if current_job.get("no_auto") else current_job["_section"]
+                sections[target].append(current_job)
             current_job = {
                 "_section": effective_section,
                 "score": int(score_match.group(1)),
@@ -95,11 +96,12 @@ def parse_queue(content: str) -> dict:
                 current_job["discovered"] = stripped.split("**Discovered:**")[1].strip()
             elif stripped.startswith("- **Applied:**"):
                 current_job["applied"] = stripped.split("**Applied:**")[1].strip()
-            elif "OPENAI LIMIT" in stripped or "Auto-Apply: NO" in stripped or "DO NOT AUTO-APPLY" in stripped:
+            elif "OPENAI LIMIT" in stripped or "Auto-Apply: NO" in stripped or "DATABRICKS" in stripped:
                 current_job["no_auto"] = True
 
     if current_job:
-        sections[current_job["_section"]].append(current_job)
+        target = "manual_apply" if current_job.get("no_auto") else current_job["_section"]
+        sections[target].append(current_job)
 
     for section in sections.values():
         for job in section:
@@ -547,11 +549,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <div class="card" style="margin-bottom:16px">
   <div class="tabs">
     <div class="tab active" onclick="switchTab('pending')">Pending Queue</div>
+    <div class="tab" onclick="switchTab('manual')">Manual Apply</div>
     <div class="tab" onclick="switchTab('progress')">In Progress</div>
     <div class="tab" onclick="switchTab('completed')">Completed</div>
     <div class="tab" onclick="switchTab('skipped')">Skipped</div>
   </div>
   <div class="tab-content active" id="tab-pending"></div>
+  <div class="tab-content" id="tab-manual"></div>
   <div class="tab-content" id="tab-progress"></div>
   <div class="tab-content" id="tab-completed"></div>
   <div class="tab-content" id="tab-skipped"></div>
@@ -671,7 +675,11 @@ function render() {
   ).join('');
 
   // Queue tabs
+  const manualJobs = q.manual_apply || [];
+  document.querySelector('[onclick="switchTab(\'pending\')"]').textContent = `Pending Queue (${q.pending.length})`;
+  document.querySelector('[onclick="switchTab(\'manual\')"]').textContent = `Manual Apply (${manualJobs.length})`;
   renderJobTable('tab-pending', q.pending, true);
+  renderJobTable('tab-manual', manualJobs, true);
   renderJobTable('tab-progress', q.in_progress, true);
   renderJobTable('tab-completed', q.completed, false);
   renderJobTable('tab-skipped', q.skipped, false);
@@ -710,7 +718,7 @@ function renderJobTable(id, jobs, showScore) {
     <tr>${showScore ? '<th>Score</th>' : ''}<th>Company</th><th>Title</th><th>Location</th><th>Salary</th><th>H-1B</th><th>Link</th><th></th></tr>
     ${jobs.map(j => `<tr>
       ${showScore ? `<td class="score">${j.score}</td>` : ''}
-      <td>${esc(j.company)}${j.no_auto ? '<br><span class="openai-warn">No auto-apply</span>' : ''}</td>
+      <td>${esc(j.company)}</td>
       <td>${esc(j.title)}</td>
       <td>${esc(j.location)}</td>
       <td>${esc(j.salary)}</td>

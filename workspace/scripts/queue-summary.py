@@ -5,6 +5,7 @@ Output a compact summary of the job queue for agents to minimize context window 
 Usage:
   python3 scripts/queue-summary.py                  # Top 10 PENDING jobs (1-line each)
   python3 scripts/queue-summary.py --top 5           # Top 5
+  python3 scripts/queue-summary.py --actionable      # Top 10, skip NO-AUTO entries
   python3 scripts/queue-summary.py --section pending  # Specific section
   python3 scripts/queue-summary.py --stats            # Just stats
 
@@ -40,7 +41,7 @@ def parse_queue_compact():
             stats['in_progress'] = int(m.group(2))
 
         # Section headers
-        if 'DO NOT AUTO-APPLY' in stripped:
+        if stripped.startswith('## ') and 'DO NOT AUTO-APPLY' in stripped:
             current_section = 'no_auto'
             continue
         elif stripped == '## IN PROGRESS':
@@ -136,6 +137,7 @@ def main():
     top_n = 10
     section = 'pending'
     stats_only = False
+    actionable_only = False
 
     i = 0
     while i < len(args):
@@ -147,6 +149,9 @@ def main():
             i += 2
         elif args[i] == '--stats':
             stats_only = True
+            i += 1
+        elif args[i] == '--actionable':
+            actionable_only = True
             i += 1
         elif args[i] == '--all':
             top_n = 999
@@ -167,6 +172,9 @@ def main():
     jobs = sections.get(section, [])
     # Sort by score descending
     jobs.sort(key=lambda j: j['score'], reverse=True)
+
+    if actionable_only:
+        jobs = [j for j in jobs if not j.get('no_auto')]
 
     for job in jobs[:top_n]:
         print(format_job_line(job))

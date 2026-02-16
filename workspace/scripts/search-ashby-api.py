@@ -42,7 +42,7 @@ RELEVANT_RE = re.compile(
 
 # Known Ashby companies with metadata for scoring
 COMPANY_INFO = {
-    'openai': {'name': 'OpenAI', 'info': 'Top AI lab ($300B+ valuation)', 'score': 100, 'h1b': 'Confirmed', 'autoApply': False},
+    # OpenAI removed — 5-app/180-day limit, Howard applies manually
     'cohere': {'name': 'Cohere', 'info': 'Frontier LLM lab ($6.8B valuation)', 'score': 90, 'h1b': 'Likely'},
     'magic.dev': {'name': 'Magic AI', 'info': 'AGI/code ($465M raised, Sequoia/a16z)', 'score': 90, 'h1b': 'Likely'},
     'sesame': {'name': 'Sesame AI', 'info': 'AI voice ($307M, Oculus founders)', 'score': 80, 'h1b': 'Likely'},
