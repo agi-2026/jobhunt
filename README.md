@@ -104,68 +104,65 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 
 ## Quick Start
 
-### 1. Clone and configure
+### 1. Install OpenClaw
 
 ```bash
-git clone https://github.com/agi-2026/jobhunt.git
-cd jobhunt
+git clone https://github.com/nichochar/openclaw.git ~/openclaw
+cd ~/openclaw && pnpm install
 ```
 
-### 2. Set up your profile
-
-Copy the example files and fill in your details:
+### 2. Clone JobHunt
 
 ```bash
+git clone https://github.com/agi-2026/jobhunt.git ~/jobhunt
+cd ~/jobhunt
+```
+
+### 3. Run setup
+
+The setup script creates config files from templates and symlinks the workspace into OpenClaw:
+
+```bash
+./setup.sh
+```
+
+This will:
+- Copy `.example` templates → personal config files (if they don't exist yet)
+- Symlink `~/.openclaw/workspace` → your repo's `workspace/` directory
+- Symlink `~/.openclaw/cron/jobs.json` → your repo's `cron/jobs.json`
+- Create required directories
+
+### 4. Configure your profile
+
+Edit the generated config files with your personal data:
+
+```bash
+# Your background, talking points, personality for essays
+edit workspace/SOUL.md
+
+# Standard form fields (name, email, phone, education)
+edit workspace/form-fields.md
+
+# The form filler engine — update the PROFILE object (lines 17-86)
+edit workspace/scripts/form-filler.js
+
+# Your alumni networks for connection search
+edit workspace/scripts/search-connections.py
+
+# Target companies to monitor
+edit workspace/company-watchlist.md
+
+# Search schedule and job boards
+edit workspace/search-rotation.md
+
+# Agent instructions — set your deadline, preferences, skip rules
+edit workspace/AGENTS.md
+
+# Cron jobs — update phone numbers, email, model preferences
+edit cron/jobs.json
+
 # API keys
-cp .env.example workspace/.env
-# Edit workspace/.env with your Brave API key
-
-# Personal profile for essay writing
-cp workspace/SOUL.md.example workspace/SOUL.md
-# Edit workspace/SOUL.md with your background, achievements, talking points
-
-# Form fields (name, email, phone, education, etc.)
-cp workspace/form-fields.md.example workspace/form-fields.md
-# Edit workspace/form-fields.md with your details
-
-# Target companies
-cp workspace/company-watchlist.md.example workspace/company-watchlist.md
-# Edit with companies you want to monitor
-
-# Search schedule
-cp workspace/search-rotation.md.example workspace/search-rotation.md
-# Configure which boards to search and how often
-
-# Cron jobs
-cp cron/jobs.json.example cron/jobs.json
-# Update phone numbers, email, and model preferences
-```
-
-### 3. Update the form filler
-
-Edit `workspace/scripts/form-filler.js` — replace the `PROFILE` object (lines 17-86) with your personal information. Every field matters:
-
-```javascript
-const PROFILE = {
-  firstName: 'Your First Name',
-  lastName: 'Your Last Name',
-  email: 'you@example.com',
-  phone: '+15555555555',
-  linkedin: 'https://linkedin.com/in/you',
-  // ... see file for all fields
-};
-```
-
-### 4. Update the connection search
-
-Edit `workspace/scripts/search-connections.py` — replace the `NETWORKS` list with your schools and past employers:
-
-```python
-NETWORKS = [
-    ('MIT', 'Massachusetts Institute of Technology'),
-    ('Google', 'Google'),
-    # Add your schools and past employers
-]
+edit .env
 ```
 
 ### 5. Add your resume
@@ -174,29 +171,19 @@ NETWORKS = [
 cp /path/to/your/resume.pdf workspace/resume/
 ```
 
-Update the resume filename in `workspace/AGENTS.md` (Phase 3: Resume Upload section).
+Update the resume filename in `workspace/AGENTS.md` (Phase 3: Resume Upload).
 
-### 6. Install OpenClaw and set up workspace
+### 6. Link WhatsApp and launch
 
 ```bash
-# Install OpenClaw (see their docs for full setup)
-git clone https://github.com/nichochar/openclaw.git ~/openclaw
-cd ~/openclaw && pnpm install
-
-# Link workspace
-cp -r jobhunt/workspace/* ~/.openclaw/workspace/
-
-# Import cron jobs
-cp jobhunt/cron/jobs.json ~/.openclaw/cron/jobs.json
-
-# Link WhatsApp
-pnpm openclaw channels login --channel whatsapp --account default
+cd ~/openclaw && pnpm openclaw channels login --channel whatsapp --account default
+cd ~/jobhunt && ./start.sh
 ```
 
-### 7. Launch
+### 7. Verify
 
 ```bash
-./start.sh
+./setup.sh --check
 ```
 
 Open `http://localhost:8765` to see your dashboard.
@@ -205,55 +192,94 @@ Open `http://localhost:8765` to see your dashboard.
 
 ```
 jobhunt/
-├── README.md                          # You are here
-├── start.sh                           # Startup script (gateway + dashboard)
-├── .env.example                       # API key template
+├── README.md                              # You are here
+├── setup.sh                               # Interactive setup (creates configs + symlinks)
+├── start.sh                               # Launch gateway + dashboard
+├── .env.example                           # API key template
 │
 ├── dashboard/
-│   └── server.py                      # Web dashboard (pipeline, queue, agents)
+│   └── server.py                          # Web dashboard (pipeline, queue, agents)
 │
-├── workspace/                         # → copies to ~/.openclaw/workspace/
-│   ├── AGENTS.md                      # Agent instructions & workflows
-│   ├── IDENTITY.md                    # Agent persona definition
-│   ├── HEARTBEAT.md                   # Periodic health check tasks
-│   ├── TOOLS.md                       # Environment-specific notes
-│   ├── TODO.md                        # Improvement tracker
-│   ├── ats-reference.md               # ATS platform edge cases
-│   ├── SOUL.md.example                # ← Your persona template
-│   ├── form-fields.md.example         # ← Your form data template
-│   ├── search-rotation.md.example     # ← Search schedule template
-│   ├── company-watchlist.md.example   # ← Target companies template
+├── workspace/                             # ← symlinked to ~/.openclaw/workspace/
+│   │
+│   │  # TEMPLATES (tracked in git — copy to create personal versions)
+│   ├── AGENTS.md.example                  # Agent instructions template
+│   ├── SOUL.md.example                    # Persona/essay template
+│   ├── form-fields.md.example             # Form data template
+│   ├── search-rotation.md.example         # Search schedule template
+│   ├── company-watchlist.md.example       # Target companies template
+│   ├── ats-reference.md.example           # ATS edge cases template
+│   ├── HEARTBEAT.md.example               # Heartbeat check template
+│   │
+│   │  # CODE (tracked in git — no personal data)
+│   ├── IDENTITY.md                        # Agent persona definition
+│   ├── TOOLS.md                           # Environment-specific notes
 │   │
 │   ├── scripts/
-│   │   ├── form-filler.js             # Deterministic form filler (45KB)
-│   │   ├── fill-custom-answers.js     # AI essay/custom question handler
-│   │   ├── scrape-board.js            # Universal job board scraper
-│   │   ├── scrape-ashby.js            # Ashby-specific scraper
-│   │   ├── scrape-greenhouse.js       # Greenhouse-specific scraper
-│   │   ├── scrape-lever.js            # Lever-specific scraper
-│   │   ├── scrape-linkedin.js         # LinkedIn search scraper
-│   │   ├── scrape-workatastartup.js   # YC Work at a Startup scraper
-│   │   ├── add-to-queue.py            # Add job to priority queue
-│   │   ├── check-dedup.py             # Deduplication checker
-│   │   ├── build-dedup-index.py       # Rebuild dedup index from tracker
-│   │   ├── compact-queue.py           # Archive old queue entries
-│   │   ├── queue-summary.py           # Compact queue view (1 line/job)
-│   │   ├── search-greenhouse-api.py   # Greenhouse API search (no browser)
-│   │   ├── search-hn-hiring.py        # HN Who is Hiring scraper
-│   │   ├── search-connections.py      # LinkedIn alumni search via Brave
-│   │   ├── read-memory.py             # Multi-layer memory reader
-│   │   ├── update-tracker-stage.py    # Update job stage in tracker
-│   │   ├── health-check.py            # System health monitor
-│   │   ├── analyze-logs.py            # Log analysis for improvements
-│   │   └── ats-notes.md               # ATS behavior documentation
+│   │   │  # Templates (tracked)
+│   │   ├── form-filler.js.example         # Form filler with placeholder PROFILE
+│   │   ├── search-connections.py.example  # Connection search with placeholder NETWORKS
+│   │   ├── ats-notes.md.example           # ATS notes template
+│   │   │
+│   │   │  # Code (tracked — no personal data)
+│   │   ├── fill-custom-answers.js         # AI essay/custom question handler
+│   │   ├── scrape-board.js               # Universal job board scraper
+│   │   ├── scrape-ashby.js               # Ashby-specific scraper
+│   │   ├── scrape-greenhouse.js          # Greenhouse-specific scraper
+│   │   ├── scrape-lever.js               # Lever-specific scraper
+│   │   ├── scrape-linkedin.js            # LinkedIn search scraper
+│   │   ├── scrape-workatastartup.js      # YC Work at a Startup scraper
+│   │   ├── add-to-queue.py               # Add job to priority queue
+│   │   ├── check-dedup.py                # Deduplication checker
+│   │   ├── build-dedup-index.py          # Rebuild dedup index from tracker
+│   │   ├── compact-queue.py              # Archive old queue entries
+│   │   ├── queue-summary.py              # Compact queue view (1 line/job)
+│   │   ├── search-greenhouse-api.py      # Greenhouse API search (no browser)
+│   │   ├── search-hn-hiring.py           # HN Who is Hiring scraper
+│   │   ├── read-memory.py                # Multi-layer memory reader
+│   │   ├── update-tracker-stage.py       # Update job stage in tracker
+│   │   ├── health-check.py               # System health monitor
+│   │   └── analyze-logs.py               # Log analysis for improvements
 │   │
-│   ├── memory/                        # Agent session memory (gitignored)
-│   ├── resume/                        # Your resume PDF (gitignored)
-│   └── analysis/                      # Daily analysis reports (gitignored)
+│   │  # PERSONAL CONFIG (gitignored — created by setup.sh from templates)
+│   ├── AGENTS.md                          # Your agent instructions
+│   ├── SOUL.md                            # Your persona
+│   ├── form-fields.md                     # Your form data
+│   ├── ...                                # (other personal configs)
+│   │
+│   │  # RUNTIME DATA (gitignored — generated by agents)
+│   ├── job-queue.md                       # Priority queue (managed by agents)
+│   ├── job-tracker.md                     # Application log
+│   ├── dedup-index.md                     # Deduplication index
+│   ├── memory/                            # Agent session memory
+│   ├── resume/                            # Your resume PDF
+│   └── analysis/                          # Daily analysis reports
 │
 └── cron/
-    └── jobs.json.example              # Cron job configuration template
+    ├── jobs.json.example                  # Cron configuration template
+    └── jobs.json                          # Your cron config (gitignored, symlinked)
 ```
+
+### Architecture: OpenClaw as Platform, JobHunt as Agent
+
+```
+~/openclaw/                    ← OpenClaw platform (update with git pull)
+                                  Provides: gateway, cron, browser, channels
+
+~/jobhunt/                     ← JobHunt agent (this repo — source of truth)
+  workspace/                      All scripts, templates, and runtime data
+  dashboard/                      Dashboard server
+  cron/                           Agent schedules
+
+~/.openclaw/                   ← OpenClaw runtime (config + symlinks)
+  openclaw.json                   Gateway config
+  workspace → ~/jobhunt/workspace/    ← SYMLINK (single source of truth)
+  cron/jobs.json → ~/jobhunt/cron/jobs.json  ← SYMLINK
+  browser/                        Chrome profile (managed by OpenClaw)
+  agents/                         Auth tokens (managed by OpenClaw)
+```
+
+OpenClaw is treated as a dependency — never modified, updated independently. All agent logic lives in this repo.
 
 ## How It Works
 
