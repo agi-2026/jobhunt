@@ -9,13 +9,13 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 │                    JobHunt Agent Architecture                 │
 │                                                               │
 │  ┌──────────────┐     job-queue.md      ┌───────────────────┐ │
-│  │ Search Agent  │ ──── (priority) ────▶│ Application Agent │ │
-│  │  (Producer)   │     sorted queue     │   (Consumer)      │ │
+│  │ Search Agent │ ──── (priority) ────▶│ Application Agent  │ │
+│  │  (Producer)  │     sorted queue     │   (Consumer)       │ │
 │  │              │                       │                   │ │
-│  │ • Greenhouse  │                      │ • Form Filler     │ │
-│  │ • HN Hiring   │                      │ • Resume Upload   │ │
-│  │ • Brave API   │                      │ • Essay Writer    │ │
-│  │ • Browser     │                      │ • Submit + Log    │ │
+│  │ • Greenhouse │                      │ • Form Filler      │ │
+│  │ • HN Hiring  │                      │ • Resume Upload    │ │
+│  │ • Brave API  │                      │ • Essay Writer     │ │
+│  │ • Browser    │                      │ • Submit + Log     │ │
 │  └──────────────┘                       └───────────────────┘ │
 │        │                                         │            │
 │        │          ┌──────────────┐               │            │
@@ -23,13 +23,13 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 │                   │  :8765       │                            │
 │                   └──────┬───────┘                            │
 │                          │                                    │
-│  ┌──────────────┐  ┌────┴─────┐  ┌──────────────┐             │
-│  │Email Monitor │  │ Evening  │  │Health Monitor│             │
-│  │  (2h cycle)  │  │ Summary  │  │ (30m cycle)  │             │
-│  │              │  │ (9 PM)   │  │              │             │
-│  │ Detect reply │  │ Pipeline │  │ Error alerts │             │
-│  │ Update stage │  │ report   │  │ Stuck agents │             │
-│  └──────────────┘  └──────────┘  └──────────────┘             │
+│  ┌──────────────┐  ┌─────┴─────┐  ┌──────────────┐            │
+│  │Email Monitor │  │ Evening   │  │Health Monitor│            │
+│  │  (2h cycle)  │  │ Summary   │  │ (30m cycle)  │            │
+│  │              │  │ (9 PM)    │  │              │            │
+│  │ Detect reply │  │ Pipeline  │  │ Error alerts │            │
+│  │ Update stage │  │ report    │  │ Stuck agents │            │
+│  └──────────────┘  └───────────┘  └──────────────┘            │
 │                                                               │
 │  ┌──────────────┐                   ┌─────────┐               │
 │  │Analysis Agent│                   │WhatsApp │               │
