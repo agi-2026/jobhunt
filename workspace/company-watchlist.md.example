@@ -1,0 +1,39 @@
+# Company Watchlist — Direct Career Page Monitoring
+
+> Prioritized list of companies to check regularly for open roles.
+> Search Agent picks 2-3 DUE companies each session.
+
+---
+
+## Tier 1 — Check Daily (Dream Companies)
+
+| Company | ATS | Career Page | Scraper | Notes |
+|---------|-----|-------------|---------|-------|
+| Example AI Lab | Greenhouse | boards.greenhouse.io/example | search-greenhouse-api.py example | $350K-$475K, top lab |
+
+## Tier 2 — Every 2 Days (Strong Matches)
+
+| Company | ATS | Career Page | Scraper | Notes |
+|---------|-----|-------------|---------|-------|
+| AI Startup Inc | Ashby | jobs.ashbyhq.com/aistartup | scrape-ashby.js | Series B, $200K-$300K |
+
+## Tier 3 — Weekly (Selective Apply)
+
+| Company | ATS | Career Page | Scraper | Notes |
+|---------|-----|-------------|---------|-------|
+| Big Tech Co | Custom | careers.bigtech.com | Browser only | NO AUTO-APPLY — manual only |
+
+## Tier 4 — Discovery (Explore When Time Allows)
+
+| Company | ATS | Career Page | Notes |
+|---------|-----|-------------|-------|
+| New Startup | Lever | jobs.lever.co/newstartup | Recently funded, worth checking |
+
+---
+
+## Adding Companies
+When you discover a promising company:
+1. Identify their ATS (check career page URL)
+2. Add to appropriate tier
+3. If Greenhouse, find the slug and add to search-rotation.md API section
+4. If Ashby/Lever, add to browser-based rotation

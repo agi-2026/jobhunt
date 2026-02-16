@@ -1,0 +1,25 @@
+# Application Form Common Fields
+
+```
+Full Name: Your Full Name
+First Name: Your
+Last Name: Name
+Email: you@example.com
+Phone: +1 555-555-5555
+LinkedIn: https://www.linkedin.com/in/your-profile
+GitHub: https://github.com/your-username
+Location: City, State
+Willing to relocate: Yes
+Work Authorization: US Citizen / Green Card / F1-OPT / H-1B (choose one)
+Visa Sponsorship Required: Yes/No
+Education: M.S. Computer Science, University Name (Start - End)
+Education 2: B.S. Field, University Name (Start - End)
+Most Recent Title: Your Title
+Most Recent Company: Company Name
+Years of Experience: X+
+Desired Salary: $XXX,000 - $XXX,000 (negotiable based on equity)
+Start Date: Immediately available
+Earliest Start Date: Immediately
+How did you hear: Company careers page
+Disability Status: I do not wish to answer
+```

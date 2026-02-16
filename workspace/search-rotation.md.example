@@ -1,0 +1,61 @@
+# Search Rotation Schedule
+
+> Tracks which boards to search, when last searched, and rotation frequency.
+> Search Agent reads this at session start and picks DUE boards.
+
+---
+
+## API-Based Boards (fastest — no browser needed)
+
+### Greenhouse Companies
+| Company | Slug | Frequency | Last Searched | Next Due |
+|---------|------|-----------|---------------|----------|
+| Company A | companya | 12h | 2026-01-01 08:00 | 2026-01-01 20:00 |
+| Company B | companyb | 12h | 2026-01-01 08:00 | 2026-01-01 20:00 |
+
+> Find Greenhouse slugs from career page URLs: `boards.greenhouse.io/<slug>/jobs`
+
+### HN Who is Hiring
+| Source | Frequency | Last Searched | Next Due |
+|--------|-----------|---------------|----------|
+| HN Monthly Thread | 24h | 2026-01-01 | 2026-01-02 |
+
+---
+
+## Browser-Based Boards (slower — needs browser session)
+
+### LinkedIn Searches
+| Query | Frequency | Last Searched | Next Due |
+|-------|-----------|---------------|----------|
+| "AI engineer" startup | 20h | 2026-01-01 | 2026-01-02 |
+| "research scientist" machine learning | 20h | 2026-01-01 | 2026-01-02 |
+
+### Ashby Boards
+| Company | URL | Frequency | Last Searched | Next Due |
+|---------|-----|-----------|---------------|----------|
+| Example Corp | jobs.ashbyhq.com/example | 16h | 2026-01-01 | 2026-01-01 |
+
+### YC Work at a Startup
+| Filter | URL | Frequency | Last Searched | Next Due |
+|--------|-----|-----------|---------------|----------|
+| AI/ML Engineering | workatastartup.com/jobs?... | 16h | 2026-01-01 | 2026-01-01 |
+
+---
+
+## Brave Search API Query Bank
+> Rotate through these queries. Pick 2-3 per session.
+
+| Query | Frequency | Last Used | Next Due |
+|-------|-----------|-----------|----------|
+| AI startup hiring machine learning engineer 2026 | 24h | | |
+| research scientist LLM job openings | 24h | | |
+| YC AI startup founding engineer | 24h | | |
+| series A AI company hiring | 24h | | |
+
+---
+
+## Rotation Rules
+- API boards: search every session (fast, no cost)
+- Browser boards: respect DUE times to avoid rate limiting
+- Brave queries: rotate 2-3 per session, cycle through all weekly
+- Update timestamps after each search
