@@ -22,6 +22,7 @@ workspace/job-queue-archive.md
 workspace/job-tracker.md
 workspace/dedup-index.md
 workspace/manual-dedup.md
+workspace/yield-log.json
 workspace/memory/
 !workspace/memory/.gitkeep
 workspace/analysis/

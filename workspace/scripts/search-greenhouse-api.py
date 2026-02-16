@@ -212,5 +212,16 @@ def main():
 
     print(f'\nSummary: {new_count} new, {dup_count} duplicate (of {len(relevant)} relevant)')
 
+    # Log yield for dynamic scheduling
+    if auto_add:
+        try:
+            subprocess.run(
+                ['python3', os.path.join(SCRIPT_DIR, 'log-yield.py'),
+                 str(new_count), str(dup_count), f'Greenhouse:{slug}'],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+
 if __name__ == '__main__':
     main()
