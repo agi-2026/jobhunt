@@ -732,9 +732,9 @@ function renderJobTable(id, jobs, showScore) {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const map = {pending: 0, progress: 1, completed: 2, skipped: 3};
+  const map = {pending: 0, manual: 1, progress: 2, completed: 3, skipped: 4};
   document.querySelectorAll('.tab')[map[name]].classList.add('active');
-  document.getElementById('tab-' + (name === 'progress' ? 'progress' : name)).classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
 }
 
 async function addDedup() {
