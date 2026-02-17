@@ -51,12 +51,18 @@ For each entry in `comboboxFields[]`:
 4. Press Enter to select
 5. Take snapshot to verify
 
-### Phase 4: Toggle Button Verification
-form-filler.js fills toggles with `simulateRealClick()`.
+### Phase 4: Toggle Button Verification (CRITICAL)
+form-filler.js fills toggles with `simulateRealClick()` (full pointer event chain: pointerdown → mousedown → pointerup → mouseup → click → focus). However, **JS clicks may only set CSS active class without updating React internal state**.
+
 For EACH filled field with `method: "ashby-toggle-click"`:
-- Take snapshot and verify the button shows correct visual state
-- If wrong: use Playwright `click` on the button's aria-ref instead
-- Take another snapshot to confirm
+1. Take snapshot and verify the button shows correct visual state (selected/highlighted)
+2. If the toggle appears WRONG or unselected:
+   - Use **Playwright `click`** on the button's aria-ref: `browser act kind=click ref="<ref>" profile="ashby"`
+   - Playwright clicks go through the browser's real event pipeline and reliably update React state
+   - Take another snapshot to confirm
+3. Common toggles to verify: work authorization (Yes), visa sponsorship (Yes), gender/race (Decline)
+
+**Why Playwright clicks work but JS doesn't always:** Ashby toggle buttons use React synthetic events. JS `dispatchEvent()` creates native DOM events that bypass React's event delegation. Playwright clicks trigger events at the browser level, which React captures via its root event listener.
 
 ### Phase 5: Resume Upload
 Use the upload action with ref from `fileUploadSelectors`:

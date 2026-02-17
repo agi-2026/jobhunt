@@ -1,95 +1,126 @@
 # JobHunt — Autonomous AI Job Search Agent
 
-An open-source, fully autonomous job search agent that discovers jobs, applies to them, tracks your pipeline, and keeps you informed — all while you sleep.
+An open-source, fully autonomous job search agent that discovers jobs, applies to them in parallel, tracks your pipeline, and keeps you informed — all while you sleep.
 
 Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│                    JobHunt Agent Architecture                 │
-│                                                               │
-│  ┌──────────────┐     job-queue.md      ┌───────────────────┐ │
-│  │ Search Agent │ ──── (priority) ────▶ │ Application Agent │ │
-│  │  (Producer)  │     sorted queue      │   (Consumer)      │ │
-│  │              │                       │                   │ │
-│  │ • Greenhouse │                       │ • Form Filler     │ │
-│  │ • HN Hiring  │                       │ • Resume Upload   │ │
-│  │ • Brave API  │                       │ • Essay Writer    │ │
-│  │ • Browser    │                       │ • Submit + Log    │ │
-│  └──────────────┘                       └───────────────────┘ │
-│        │                                         │            │
-│        │          ┌──────────────┐               │            │
-│        └─────────▶│  Dashboard   │◀──────────────┘            │
-│                   │  :8765       │                            │
-│                   └──────┬───────┘                            │
-│                          │                                    │
-│  ┌──────────────┐  ┌─────┴─────┐  ┌──────────────┐            │
-│  │Email Monitor │  │ Evening   │  │Health Monitor│            │
-│  │  (2h cycle)  │  │ Summary   │  │ (30m cycle)  │            │
-│  │              │  │ (9 PM)    │  │              │            │
-│  │ Detect reply │  │ Pipeline  │  │ Error alerts │            │
-│  │ Update stage │  │ report    │  │ Stuck agents │            │
-│  └──────────────┘  └───────────┘  └──────────────┘            │
-│                                                               │
-│  ┌──────────────┐                   ┌─────────┐               │
-│  │Analysis Agent│                   │WhatsApp │               │
-│  │ (daily 8:30) │──────────────────▶│ (you)   │               │
-│  │ Log analysis │                   └─────────┘               │
-│  └──────────────┘                                             │
-└───────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                   JobHunt v5 — Parallel Application Architecture         │
+│                                                                          │
+│  Search Agent (every 30 min)                                             │
+│  ┌──────────────────────────────────────────┐                            │
+│  │ API-first: Ashby + Greenhouse + Lever    │                            │
+│  │ 172 companies across 3 ATS types         │──▶ job-queue.md            │
+│  │ HN Who is Hiring (monthly)               │    (priority sorted)       │
+│  └──────────────────────────────────────────┘                            │
+│                                                                          │
+│  Application Orchestrator (every 5 min)                                  │
+│  ┌──────────────────────────────────────────┐                            │
+│  │ 1. Batch preflight (remove dead links)   │                            │
+│  │ 2. Check locks + queue per ATS type      │                            │
+│  │ 3. Spawn parallel subagents ─────────────┼──┐                         │
+│  └──────────────────────────────────────────┘  │                         │
+│                                                │                         │
+│  Subagent Lane (true parallelism)              │                         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐            │
+│  │ Ashby Agent     │ │ Greenhouse Agent│ │ Lever Agent     │            │
+│  │ browser :18801  │ │ browser :18802  │ │ browser :18803  │            │
+│  │ up to 3 apps    │ │ up to 3 apps   │ │ up to 3 apps    │            │
+│  │ form-filler.js  │ │ form-filler.js │ │ form-filler.js  │            │
+│  └────────┬────────┘ └───────┬────────┘ └────────┬────────┘            │
+│           └──────────────────┼───────────────────┘                      │
+│                              ▼                                           │
+│                      job-tracker.md                                      │
+│                                                                          │
+│  ┌──────────────┐  ┌───────────┐  ┌──────────────┐                      │
+│  │Health Monitor│  │ Dashboard │  │   WhatsApp   │                      │
+│  │  (30m cycle) │  │   :8765   │  │ notifications│                      │
+│  └──────────────┘  └───────────┘  └──────────────┘                      │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## What It Does
 
 | Agent | Schedule | Model | Job |
 |-------|----------|-------|-----|
-| **Search Agent** | Every 5 min | Sonnet 4.5 | Discovers jobs via Greenhouse API, HN Hiring, Brave Search, browser scraping. Scores and ranks them. |
-| **Application Agent** | Every 2 min | Opus 4.6 | Picks the highest-scored job, fills the form, writes essays, uploads resume, submits. Up to 5 per cycle. |
-| **Email Monitor** | Every 2 hours | Haiku 4.5 | Scans Gmail for recruiter replies, interview invites, rejections. Updates pipeline stages. |
-| **Evening Summary** | Daily 9 PM | Haiku 4.5 | Sends you a WhatsApp summary: jobs found, applied, pipeline health, action items. |
-| **Analysis Agent** | Daily 8:30 PM | Haiku 4.5 | Parses cron logs, identifies failure patterns, suggests improvements. |
-| **Health Monitor** | Every 30 min | Haiku 4.5 | Checks for stuck agents, consecutive errors, queue issues. Alerts only when something is wrong. |
+| **Search Agent** | Every 30 min | Sonnet 4.5 | Discovers jobs via Ashby/Greenhouse/Lever APIs + HN Hiring. Scores, deduplicates, adds to priority queue. |
+| **Application Orchestrator** | Every 5 min | Sonnet 4.5 | Checks locks and queues, spawns parallel ATS-specific subagents via `sessions_spawn`. |
+| **Ashby Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Ashby jobs per cycle. Dedicated browser profile (port 18801). |
+| **Greenhouse Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Greenhouse jobs per cycle. Handles email verification. Dedicated browser (port 18802). |
+| **Lever Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Lever jobs per cycle. Dedicated browser (port 18803). |
+| **Health Monitor** | Every 30 min | Haiku 4.5 | Checks for stuck agents, consecutive errors, queue issues. WhatsApp alerts only for critical issues. |
 
-**Typical daily output:** 15+ jobs discovered, 8+ applications submitted, all on autopilot.
+**Typical daily output:** 50+ jobs discovered, 15+ applications submitted across 3 ATS types in parallel.
+
+## Key Innovations
+
+### Parallel Application via `sessions_spawn`
+
+OpenClaw's cron lane is serialized — jobs run one at a time. JobHunt works around this with an **orchestrator pattern**: a single cron job spawns up to 3 subagents that run truly in parallel on the subagent lane. Each subagent has its own browser profile and ATS-specific skill set.
+
+**Before (v4):** 3 ATS agents run serially → ~45 min per cycle
+**After (v5):** 3 subagents run in parallel → ~15 min per cycle (limited by the slowest)
+
+### API-First Job Discovery
+
+No browser overhead for search. All 172 tracked companies are searched via their native ATS APIs:
+
+| ATS | Companies | Method |
+|-----|-----------|--------|
+| Ashby | 98 | GraphQL API (`/api/posting-api/postings`) |
+| Greenhouse | 59 | JSON API (`/v1/boards/{slug}/jobs`) |
+| Lever | 15 | JSON API (`/v0/postings/{slug}`) |
+
+New companies are added by simply editing the Python search scripts — no browser automation needed.
+
+### Deterministic Form Filling
+
+Each ATS type has its own `form-filler.js` that fills 40+ standard fields in ~1 second via browser JS injection. No AI calls needed for standard fields — only custom/essay questions use the model.
+
+### Concurrent Queue Safety
+
+With 3 subagents writing to `job-queue.md` and `dedup-index.md` simultaneously, file-level `fcntl.flock()` advisory locking prevents data corruption. A shared `.queue.lock` file ensures mutual exclusion across all queue-modifying scripts.
 
 ## Features
 
 ### Intelligent Job Discovery
-- **API-first search** — Greenhouse API, HN Who is Hiring (no browser overhead)
-- **Browser scraping** — Ashby, Lever, LinkedIn, YC Work at a Startup
-- **Brave Search API** — general web search for job listings
+- **API-first search** — Ashby GraphQL, Greenhouse JSON, Lever JSON APIs (no browser overhead)
+- **172 tracked companies** — from top AI labs to VC portfolio startups (a16z, Sequoia)
+- **HN Who is Hiring** — monthly scrape via Algolia API
 - **Priority scoring** (max ~400) = Recency + Salary + Company Stage + Role Match
-- **Deduplication** — URL + company+title matching, auto-rebuilt index
+- **Deduplication** — URL + company+title matching, maintained atomically by scripts
+- **US/remote location filter** — auto-skips non-US jobs during search
 
 ### Autonomous Application
-- **Deterministic form filler** — fills 40+ standard fields in ~1 second via browser JS injection
+- **ATS-specific form fillers** — dedicated `form-filler.js` per platform, fills 40+ fields in ~1s
 - **React-aware** — handles Greenhouse dropdowns, Ashby toggle buttons, Lever comboboxes
-- **AI essay writer** — reads your SOUL.md persona, writes tailored 200-400 word responses
-- **Resume upload** — programmatic file upload (no OS dialogs)
+- **AI essay writer** — reads your SOUL.md persona, writes tailored 200-400 word responses inline
+- **Resume upload** — programmatic file upload via `element=` + React event verification
 - **Email verification** — auto-fetches Greenhouse verification codes from Gmail
-- **LinkedIn connections** — searches for alumni at target companies, mentions them in essays
+- **Parallel execution** — 3 browser profiles apply simultaneously (up to 9 apps per cycle)
 
 ### Smart Context Management
 - **Multi-layer memory** — hot (~2KB always loaded), warm (on-demand), cold (archived)
-- **Exec-based scripts** — agents call Python scripts instead of reading large files into context
-- **Token-efficient** — reduced context window usage from ~30K to ~5K tokens per session
+- **Exec-based scripts** — agents call Python scripts instead of reading large files
+- **Token-efficient** — ~5K tokens per session instead of ~30K
+- **File locking** — `fcntl.flock()` prevents data corruption from parallel writes
 
 ### Observability
-- **Real-time dashboard** at `localhost:8765` — pipeline, queue, agent health, stage updates
-- **WhatsApp notifications** — interview invites (instant), daily summaries, error alerts
-- **Log analysis** — daily pattern detection, failure tracking, improvement suggestions
+- **Real-time dashboard** at `localhost:8765` — 5 tabs: Pending Queue, Manual Apply, In Progress, Completed, Skipped
+- **WhatsApp notifications** — critical error alerts only (no spam)
+- **Session memory** — each agent appends to `memory/session-YYYY-MM-DD.md`
 - **Health monitoring** — consecutive error alerts, stuck agent detection
 
 ## Supported ATS Platforms
 
-| Platform | Auto-Fill | Auto-Submit | Notes |
-|----------|-----------|-------------|-------|
-| Greenhouse | Yes | Yes | Email verification auto-handled |
-| Ashby | Yes | Yes | Toggle buttons with full event chain |
-| Lever | Yes | Yes | Simple forms, direct submit |
-| Generic HTML | Yes | Yes | Standard form detection |
-| Workday | No | No | Multi-page, requires account — auto-skipped |
-| BambooHR | No | No | Complex, often CAPTCHA — auto-skipped |
+| Platform | API Search | Auto-Fill | Auto-Submit | Notes |
+|----------|-----------|-----------|-------------|-------|
+| Ashby | Yes (GraphQL) | Yes | Yes | Toggle buttons with full event chain |
+| Greenhouse | Yes (JSON) | Yes | Yes | Email verification auto-handled, MyGreenhouse autofill support |
+| Lever | Yes (JSON) | Yes | Yes | Playwright fallback for location fields |
+| Workday | No | No | No | Multi-page, requires account — manual only |
+| Custom ATS | No | No | No | 70+ companies tracked in manual-apply-priority.md |
 
 ## Prerequisites
 
@@ -97,10 +128,8 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 - **Node.js** 20+ and **pnpm**
 - **Python** 3.10+
 - **Anthropic API key** (for Claude models)
-- **Brave Search API key** ([get one free](https://brave.com/search/api/))
 - **Gmail** account with [gog](https://github.com/nichochar/gog) CLI configured
 - **WhatsApp** linked to OpenClaw (for notifications)
-- **Tailscale** (optional — for Gmail push notifications via Funnel)
 
 ## Quick Start
 
@@ -127,9 +156,9 @@ The setup script creates config files from templates and symlinks the workspace 
 ```
 
 This will:
-- Copy `.example` templates → personal config files (if they don't exist yet)
-- Symlink `~/.openclaw/workspace` → your repo's `workspace/` directory
-- Symlink `~/.openclaw/cron/jobs.json` → your repo's `cron/jobs.json`
+- Copy `.example` templates to personal config files (if they don't exist yet)
+- Symlink `~/.openclaw/workspace` to your repo's `workspace/` directory
+- Symlink `~/.openclaw/cron/jobs.json` to your repo's `cron/jobs.json`
 - Create required directories
 
 ### 4. Configure your profile
@@ -143,17 +172,12 @@ edit workspace/SOUL.md
 # Standard form fields (name, email, phone, education)
 edit workspace/form-fields.md
 
-# The form filler engine — update the PROFILE object (lines 17-86)
+# The form filler engine — update the PROFILE object
 edit workspace/scripts/form-filler.js
-
-# Your alumni networks for connection search
-edit workspace/scripts/search-connections.py
-
-# Target companies to monitor
-edit workspace/company-watchlist.md
-
-# Search schedule and job boards
-edit workspace/search-rotation.md
+# Also update ATS-specific form fillers:
+edit workspace/skills/apply-ashby/scripts/form-filler.js
+edit workspace/skills/apply-greenhouse/scripts/form-filler.js
+edit workspace/skills/apply-lever/scripts/form-filler.js
 
 # Agent instructions — set your deadline, preferences, skip rules
 edit workspace/AGENTS.md
@@ -171,16 +195,31 @@ edit .env
 cp /path/to/your/resume.pdf workspace/resume/
 ```
 
-Update the resume filename in `workspace/AGENTS.md` (Phase 3: Resume Upload).
+### 6. Add target companies
 
-### 6. Link WhatsApp and launch
+Edit the search scripts to add companies to track:
+
+```bash
+# Add Ashby companies (98 tracked by default)
+edit workspace/scripts/search-ashby-api.py
+
+# Add Greenhouse companies (59 tracked by default)
+edit workspace/scripts/search-greenhouse-api.py
+
+# Add Lever companies (15 tracked by default)
+edit workspace/scripts/search-lever-api.py
+```
+
+Each script has a `COMPANY_INFO` dict — just add a slug and metadata.
+
+### 7. Link WhatsApp and launch
 
 ```bash
 cd ~/openclaw && pnpm openclaw channels login --channel whatsapp --account default
 cd ~/jobhunt && ./start.sh
 ```
 
-### 7. Verify
+### 8. Verify
 
 ```bash
 ./setup.sh --check
@@ -192,13 +231,15 @@ Open `http://localhost:8765` to see your dashboard.
 
 ```
 jobhunt/
-├── README.md                              # You are here
+├── README.md
 ├── setup.sh                               # Interactive setup (creates configs + symlinks)
 ├── start.sh                               # Launch gateway + dashboard
 ├── .env.example                           # API key template
+├── scripts -> workspace/scripts           # Symlink (subagent exec: commands resolve here)
+├── skills -> workspace/skills             # Symlink (subagent SKILL.md reads resolve here)
 │
 ├── dashboard/
-│   └── server.py                          # Web dashboard (pipeline, queue, agents)
+│   └── server.py                          # Web dashboard (5-tab: pending, manual, progress, completed, skipped)
 │
 ├── workspace/                             # ← symlinked to ~/.openclaw/workspace/
 │   │
@@ -206,54 +247,52 @@ jobhunt/
 │   ├── AGENTS.md.example                  # Agent instructions template
 │   ├── SOUL.md.example                    # Persona/essay template
 │   ├── form-fields.md.example             # Form data template
-│   ├── search-rotation.md.example         # Search schedule template
-│   ├── company-watchlist.md.example       # Target companies template
-│   ├── ats-reference.md.example           # ATS edge cases template
 │   ├── HEARTBEAT.md.example               # Heartbeat check template
 │   │
-│   │  # CODE (tracked in git — no personal data)
+│   │  # CODE (tracked in git)
 │   ├── IDENTITY.md                        # Agent persona definition
 │   ├── TOOLS.md                           # Environment-specific notes
+│   ├── manual-apply-priority.md           # 70+ custom-ATS companies, tiered by priority
 │   │
 │   ├── scripts/
-│   │   │  # Templates (tracked)
-│   │   ├── form-filler.js.example         # Form filler with placeholder PROFILE
-│   │   ├── search-connections.py.example  # Connection search with placeholder NETWORKS
-│   │   ├── ats-notes.md.example           # ATS notes template
+│   │   │  # Search (API-first, no browser)
+│   │   ├── search-ashby-api.py            # Ashby GraphQL API (98 companies)
+│   │   ├── search-greenhouse-api.py       # Greenhouse JSON API (59 companies)
+│   │   ├── search-lever-api.py            # Lever JSON API (15 companies)
+│   │   ├── search-hn-hiring.py            # HN Who is Hiring via Algolia
+│   │   ├── detect-ats.py                  # Detect ATS type for new companies
 │   │   │
-│   │   │  # Code (tracked — no personal data)
-│   │   ├── fill-custom-answers.js         # AI essay/custom question handler
-│   │   ├── scrape-board.js               # Universal job board scraper
-│   │   ├── scrape-ashby.js               # Ashby-specific scraper
-│   │   ├── scrape-greenhouse.js          # Greenhouse-specific scraper
-│   │   ├── scrape-lever.js               # Lever-specific scraper
-│   │   ├── scrape-linkedin.js            # LinkedIn search scraper
-│   │   ├── scrape-workatastartup.js      # YC Work at a Startup scraper
-│   │   ├── add-to-queue.py               # Add job to priority queue
-│   │   ├── check-dedup.py                # Deduplication checker
-│   │   ├── build-dedup-index.py          # Rebuild dedup index from tracker
-│   │   ├── compact-queue.py              # Archive old queue entries
-│   │   ├── queue-summary.py              # Compact queue view (1 line/job)
-│   │   ├── search-greenhouse-api.py      # Greenhouse API search (no browser)
-│   │   ├── search-hn-hiring.py           # HN Who is Hiring scraper
-│   │   ├── read-memory.py                # Multi-layer memory reader
-│   │   ├── update-tracker-stage.py       # Update job stage in tracker
-│   │   ├── health-check.py               # System health monitor
-│   │   └── analyze-logs.py               # Log analysis for improvements
+│   │   │  # Queue management
+│   │   ├── add-to-queue.py                # Add job to priority queue
+│   │   ├── check-dedup.py                 # Dedup check (avoids reading full index)
+│   │   ├── mark-applied.py                # Update queue + dedup atomically (with flock)
+│   │   ├── remove-from-queue.py           # Remove/skip + dedup (with flock)
+│   │   ├── queue-summary.py               # Compact queue view (--ats filter, --actionable)
+│   │   ├── compact-queue.py               # Archive old entries, reduce file bloat
+│   │   ├── batch-preflight.py             # Bulk dead-link detection via ATS APIs
+│   │   ├── preflight-check.py             # Single-URL pre-flight validation
+│   │   │
+│   │   │  # Application support
+│   │   ├── verify-upload.js               # React event fix after resume upload
+│   │   ├── greenhouse-verify-code.js      # Greenhouse email verification code filler
+│   │   ├── subagent-lock.py               # File-based locking for parallel subagents
+│   │   │
+│   │   │  # Monitoring
+│   │   ├── health-check.py                # System health monitor
+│   │   ├── read-memory.py                 # Multi-layer memory reader (hot/warm/stats)
+│   │   ├── analyze-logs.py                # Log analysis for improvements
+│   │   └── dynamic-scheduler.py           # Auto-adjust cron frequency by yield
 │   │
-│   │  # PERSONAL CONFIG (gitignored — created by setup.sh from templates)
-│   ├── AGENTS.md                          # Your agent instructions
-│   ├── SOUL.md                            # Your persona
-│   ├── form-fields.md                     # Your form data
-│   ├── ...                                # (other personal configs)
-│   │
-│   │  # RUNTIME DATA (gitignored — generated by agents)
-│   ├── job-queue.md                       # Priority queue (managed by agents)
-│   ├── job-tracker.md                     # Application log
-│   ├── dedup-index.md                     # Deduplication index
-│   ├── memory/                            # Agent session memory
-│   ├── resume/                            # Your resume PDF
-│   └── analysis/                          # Daily analysis reports
+│   └── skills/                            # ATS-specific application skills
+│       ├── apply-ashby/
+│       │   ├── SKILL.md                   # Ashby-specific application instructions
+│       │   └── scripts/form-filler.js     # Ashby form filler (gitignored — personal data)
+│       ├── apply-greenhouse/
+│       │   ├── SKILL.md                   # Greenhouse-specific instructions (email verification, etc.)
+│       │   └── scripts/form-filler.js     # Greenhouse form filler (gitignored)
+│       └── apply-lever/
+│           ├── SKILL.md                   # Lever-specific instructions
+│           └── scripts/form-filler.js     # Lever form filler (gitignored)
 │
 └── cron/
     ├── jobs.json.example                  # Cron configuration template
@@ -264,48 +303,56 @@ jobhunt/
 
 ```
 ~/openclaw/                    ← OpenClaw platform (update with git pull)
-                                  Provides: gateway, cron, browser, channels
+                                  Provides: gateway, cron, browser, sessions_spawn
 
 ~/jobhunt/                     ← JobHunt agent (this repo — source of truth)
-  workspace/                      All scripts, templates, and runtime data
+  workspace/                      All scripts, templates, skills, and runtime data
   dashboard/                      Dashboard server
   cron/                           Agent schedules
+  scripts -> workspace/scripts    Symlink for subagent exec: resolution
+  skills -> workspace/skills      Symlink for subagent SKILL.md resolution
 
 ~/.openclaw/                   ← OpenClaw runtime (config + symlinks)
   openclaw.json                   Gateway config
-  workspace → ~/jobhunt/workspace/    ← SYMLINK (single source of truth)
+  workspace → ~/jobhunt/workspace/    ← SYMLINK
   cron/jobs.json → ~/jobhunt/cron/jobs.json  ← SYMLINK
-  browser/                        Chrome profile (managed by OpenClaw)
-  agents/                         Auth tokens (managed by OpenClaw)
+  browser/                        Chrome profiles (ashby, greenhouse, lever, openclaw)
 ```
-
-OpenClaw is treated as a dependency — never modified, updated independently. All agent logic lives in this repo.
 
 ## How It Works
 
-### The Producer-Consumer Loop
+### The Parallel Pipeline
 
-The system runs as a **producer-consumer pipeline**:
+The system runs as a **producer-consumer pipeline with parallel consumers**:
 
-1. **Search Agent (Producer)** runs every 5 minutes:
-   - Queries Greenhouse API, HN Hiring, Brave Search
-   - Scrapes Ashby/Lever/LinkedIn boards via browser
+1. **Search Agent (Producer)** runs every 30 minutes:
+   - Queries 172 companies across Ashby, Greenhouse, and Lever APIs
+   - Scrapes HN Who is Hiring monthly via Algolia
    - Scores each job (0-400) based on recency, salary, company stage, and role match
    - Dedup-checks against existing applications
    - Adds new jobs to `job-queue.md` sorted by score
+   - Filters non-US/non-remote jobs automatically (Greenhouse filter)
 
-2. **Application Agent (Consumer)** runs every 2 minutes:
-   - Reads queue summary (top 15 jobs, compact 1-line format)
-   - Picks the highest-scored PENDING job
-   - For high-value jobs (score >= 280): searches for LinkedIn alumni connections
-   - Opens the job URL in a browser
-   - Runs `form-filler.js` via `evaluate` — fills 40+ fields in ~1 second
-   - For custom/essay questions: reads your SOUL.md, writes tailored responses
-   - Uploads resume, submits, verifies confirmation
-   - Logs results to `job-tracker.md`
-   - Loops: up to 5 applications per cycle
+2. **Application Orchestrator** runs every 5 minutes:
+   - Runs `batch-preflight.py --all --remove` to clean dead links
+   - For each ATS type (ashby, greenhouse, lever):
+     - Checks subagent lock — skips if a previous subagent is still running
+     - Checks queue — skips if no actionable jobs for this ATS type
+     - Spawns a subagent via `sessions_spawn` with the ATS-specific task
 
-3. **Supporting agents** handle monitoring, email, analysis, and health.
+3. **ATS Subagents** (spawned in parallel on the subagent lane):
+   - Acquire a file lock for their ATS type
+   - Read their ATS-specific SKILL.md for instructions
+   - Run `form-filler.js` to fill standard fields in ~1 second
+   - Use AI for essay/custom questions (writes inline, no sub-spawning)
+   - Upload resume, submit, verify confirmation
+   - Mark applied in queue + dedup atomically (with `fcntl.flock()`)
+   - Release lock and append to session memory
+   - Each processes up to 3 jobs per invocation
+
+4. **Health Monitor** runs every 30 minutes:
+   - Checks consecutive errors, stuck agents, queue health
+   - WhatsApp alerts only for critical issues
 
 ### Scoring Formula
 
@@ -320,6 +367,17 @@ Company:  100 (top lab/unicorn) / 90 ($100M+) / 80 (Series B+) / 70 (Series A) /
 Match:    100 (exact title+skills) / 80 (strong) / 60 (partial) / 40 (adjacent)
 ```
 
+### Race Condition Safety
+
+With 3 subagents running in parallel:
+
+| Concern | Mitigation |
+|---------|------------|
+| Two subagents apply to same job | ATS-type isolation (each only sees its ATS type) |
+| Orchestrator spawns duplicate subagent | File-based lock with 25min auto-expiry |
+| Concurrent writes to queue/dedup files | `fcntl.flock()` on shared `.queue.lock` |
+| Subagent crashes without unlocking | Lock auto-expires (timeout 15min + 10min buffer) |
+
 ### Context Window Optimization
 
 Agents never read large files directly. Instead, they use exec scripts:
@@ -327,122 +385,101 @@ Agents never read large files directly. Instead, they use exec scripts:
 | Instead of reading... | Agents call... |
 |----------------------|----------------|
 | `dedup-index.md` (72KB) | `python3 scripts/check-dedup.py "<url>"` → "NEW" or "DUPLICATE" |
-| `job-queue.md` (182KB) | `python3 scripts/queue-summary.py --top 10` → compact 1-line/job |
-| `job-tracker.md` (114KB) | `python3 scripts/update-tracker-stage.py "Company" "Stage"` |
-
-Memory is tiered:
-- **Hot** (~2KB): Pipeline stats, today's activity, critical patterns — loaded every session
-- **Warm** (on-demand): ATS patterns, company notes, failure logs — loaded only when needed
-- **Cold** (archived): Past sessions, old analysis — never loaded
-
-### The Form Filler
-
-`form-filler.js` is the core engine that makes autonomous applications possible. It:
-
-1. **Detects the ATS** from the page URL (Greenhouse, Ashby, Lever, etc.)
-2. **Maps form fields** to your PROFILE data using label matching, name attributes, and placeholder text
-3. **Fills everything deterministically** in a single pass — no AI calls needed for standard fields
-4. **Handles React**: Uses `nativeInputValueSetter` + synthetic events to bypass React's controlled inputs
-5. **Handles dropdowns**: Full pointer event chain for Ashby toggles, combobox interaction for Greenhouse
-6. **Detects iframes**: If the form is in a cross-origin iframe, returns the iframe URL for redirect
-7. **Returns unfilled fields**: Custom/essay questions are flagged for AI handling
-
-Result: Standard form fill takes ~1 second instead of 5-10 minutes of per-field AI calls.
+| `job-queue.md` (180KB+) | `python3 scripts/queue-summary.py --ats ashby --top 5` → compact view |
+| `job-tracker.md` (114KB) | `python3 scripts/mark-applied.py "<url>" "<company>" "<title>"` |
 
 ## Dashboard
 
-The dashboard at `http://localhost:8765` provides:
+The dashboard at `http://localhost:8765` provides 5 tabs:
 
-- **Pipeline view** — Applied, Confirmed, Phone Screens, Interviews, Offers, Rejected (computed from actual tracker entries)
-- **Agent status** — Running/OK/Error, last run time, next scheduled, consecutive errors
-- **Job queue** — Pending (sorted by score), In Progress, Completed, Skipped
-- **Stage updates** — One-click to update a job's stage (e.g., when you get a phone screen)
-- **Dedup management** — Add URLs to prevent duplicate applications
-- **Auto-refresh** every 30 seconds
+- **Pending Queue** — Jobs waiting to be applied to, sorted by score
+- **Manual Apply** — Companies with application limits or custom ATS (OpenAI, Waymo, etc.)
+- **In Progress** — Jobs currently being processed
+- **Completed** — Successfully submitted applications
+- **Skipped** — Jobs skipped (non-US, expired, already applied)
+
+Plus: pipeline stage counts, agent status from cron state, auto-refresh.
 
 ## Customization
 
-### Adding a New Greenhouse Company
+### Adding a New Company
 
-1. Find the company's Greenhouse slug from their careers URL: `boards.greenhouse.io/<slug>/jobs`
-2. Add to `search-rotation.md` under "Greenhouse Companies"
-3. Add to `company-watchlist.md` under the appropriate tier
-4. The slug goes in your Search Agent cron job's Greenhouse API command
+1. Detect the ATS type:
+```bash
+python3 workspace/scripts/detect-ats.py "company.com"
+```
 
-### Adding a New Ashby/Lever Company
+2. Add to the appropriate search script:
+```python
+# In search-ashby-api.py, search-greenhouse-api.py, or search-lever-api.py:
+COMPANY_INFO = {
+    'company-slug': {'name': 'Company', 'info': 'Description', 'score': 80, 'h1b': 'Likely'},
+    ...
+}
+```
 
-1. Find their job board URL (e.g., `jobs.ashbyhq.com/companyname`)
-2. Add to `search-rotation.md` under "Ashby Boards" or "Lever Boards"
-3. Add to `company-watchlist.md`
-4. The browser scraper (`scrape-board.js`) auto-detects the ATS type
+3. Run the search to populate the queue:
+```bash
+python3 workspace/scripts/search-ashby-api.py --slug company-slug --add
+```
 
-### Adjusting Search Frequency
+### Adding Companies in Bulk
 
-Edit the cron expressions in `cron/jobs.json`:
-- `*/5 * * * *` = every 5 minutes
-- `*/15 * * * *` = every 15 minutes
-- `0 */2 * * *` = every 2 hours
-
-### Adding Companies to Skip
-
-In `workspace/AGENTS.md`, add companies to the "DO NOT AUTO-APPLY" section. The Application Agent will skip them and notify you via WhatsApp.
+1. Create a text file with career page URLs (one per line)
+2. Run ATS detection:
+```bash
+python3 workspace/scripts/detect-ats.py --file companies.txt
+```
+3. Add detected companies to the appropriate search scripts
+4. Add "not found" companies to `workspace/manual-apply-priority.md`
 
 ### Model Selection
 
 | Agent | Recommended Model | Why |
 |-------|------------------|-----|
-| Application Agent | Opus 4.6 | Needs judgment for essays and complex forms |
-| Search Agent | Sonnet 4.5 | Mechanical scraping, scoring doesn't need deep reasoning |
-| Email Monitor | Haiku 4.5 | Simple email classification task |
-| Evening Summary | Haiku 4.5 | Summarization is straightforward |
-| Analysis Agent | Haiku 4.5 | Log parsing and pattern matching |
+| Application Subagents | Sonnet 4.5 | Good balance of form-filling capability and cost |
+| Orchestrator | Sonnet 4.5 | Needs to parse queue output and make spawn decisions |
+| Search Agent | Sonnet 4.5 | Mechanical API calls, scoring doesn't need deep reasoning |
 | Health Monitor | Haiku 4.5 | Simple health check evaluation |
 
 ## Troubleshooting
 
-### Agent errors with "No active WhatsApp Web listener"
+### Subagent ENOENT errors
+Subagents run with CWD at the repo root. They need symlinks to find scripts and skills:
 ```bash
-pnpm openclaw channels login --channel whatsapp --account default
+cd ~/jobhunt
+ln -s workspace/scripts scripts
+ln -s workspace/skills skills
 ```
-Then scan the QR code with WhatsApp on your phone.
+
+### Gateway doesn't pick up jobs.json changes
+The gateway loads cron state into memory at startup. After editing `jobs.json`, restart:
+```bash
+kill $(pgrep -f openclaw-gateway) && pnpm openclaw gateway --port 18789
+```
+
+### "label already in use" errors in gateway logs
+A previous subagent session with the same label wasn't cleaned up. This resolves automatically when the subagent lock expires (25 min). To force-clean:
+```bash
+python3 workspace/scripts/subagent-lock.py unlock ashby
+python3 workspace/scripts/subagent-lock.py unlock greenhouse
+python3 workspace/scripts/subagent-lock.py unlock lever
+```
 
 ### Gateway times out on CLI commands
-When agents are running, CLI commands can timeout. Read `~/.openclaw/cron/jobs.json` directly instead of using `pnpm openclaw cron list`.
+When agents are running, CLI commands can timeout. Read `~/.openclaw/cron/jobs.json` directly.
 
-### Stale `runningAtMs` markers cause agents to deadlock
-Agents get stuck when a previous run didn't clean up its running state. Fix:
-```bash
-# Clean all running states in jobs.json
-python3 -c "
-import json
-with open('$HOME/.openclaw/cron/jobs.json', 'r+') as f:
-    data = json.load(f)
-    for job in data['jobs']:
-        job.get('state', {}).pop('runningAtMs', None)
-    f.seek(0); json.dump(data, f, indent=2); f.truncate()
-"
-```
-Consider setting up a watchdog script to auto-clean stale markers.
-
-### Form filler doesn't work on a specific site
-1. Check if it's Workday/BambooHR — these are auto-skipped
-2. Check if the form is in a cross-origin iframe — the filler will return an `iframeUrl`
-3. Some sites use non-standard React patterns — check `ats-reference.md` for known edge cases
-
-### Dashboard shows wrong pipeline counts
-Pipeline counts are computed from actual `- **Stage:**` lines in `job-tracker.md`. If counts look wrong, check that the stage names match exactly: `Applied`, `Confirmed`, `Phone Screen`, etc.
-
-### OAuth token expired
-If using Anthropic's OAuth tokens (OAT), they expire after ~8 hours. Set up a token refresh automation or re-login periodically.
+### Dashboard shows wrong counts
+Pipeline counts are computed from `job-tracker.md` stage entries. Queue counts are from `job-queue.md` section headers.
 
 ## Contributing
 
 This project is built in the open. Contributions welcome:
 
-- **New ATS support** — add scrapers/fillers for new platforms
+- **New ATS support** — add API scrapers + form fillers for new platforms (Workday, BambooHR)
 - **Better scoring** — improve the job relevance scoring formula
-- **New search sources** — add scrapers for more job boards
-- **Dashboard features** — charts, analytics, better UX
+- **New search sources** — add API integrations for more job boards
+- **Dashboard features** — charts, analytics, application success rates
 - **Bug fixes** — especially for ATS form handling edge cases
 
 ### How to Contribute
@@ -453,17 +490,6 @@ This project is built in the open. Contributions welcome:
 4. Test with your own OpenClaw setup
 5. Submit a PR with a clear description
 
-### Known Issues / Improvement Ideas
-
-- [ ] Lever API scraper (JSON endpoint, no browser needed)
-- [ ] Ashby GraphQL API scraper
-- [ ] Dynamic search scheduling (adjust frequency based on job yield)
-- [ ] Follow-up agent (auto-send check-in emails 5-7 days post-application)
-- [ ] A/B test application strategies (generic vs. tailored essays)
-- [ ] Token cost tracking in dashboard
-- [ ] Multi-user support (separate profiles/workspaces)
-- [ ] Docker container for easy deployment
-
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
@@ -472,7 +498,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 - [OpenClaw](https://github.com/nichochar/openclaw) — the AI agent platform that makes this possible
 - [Claude](https://claude.ai) by Anthropic — the AI models powering the agents
-- [Brave Search API](https://brave.com/search/api/) — web search for job discovery and connection search
 
 ---
 

@@ -43,12 +43,28 @@ Parse the returned JSON.
 
 **Lever uses native HTML forms** — no React comboboxes, no toggle buttons. The form-filler handles everything via JS. No Playwright interaction needed for dropdowns (native `<select>` elements).
 
+### Phase 2.5: Playwright Re-fill (if needed)
+If `playwrightFields[]` is non-empty, re-type those fields using Playwright:
+```
+browser act kind=type ref="<ref or selector>" text="<value>" profile="lever"
+```
+**Location field** is the most common — JS setNativeValue doesn't trigger Lever's autocomplete, so the value doesn't persist. Playwright `type` sends real keyboard events that activate the autocomplete.
+
 ### Phase 3: Resume Upload
-Lever uses standard `input[type=file]`. Use the upload action:
+**CRITICAL: All form fields MUST be filled BEFORE uploading resume.** Lever's form validation checks all fields when upload triggers. If fields (especially LinkedIn) are empty at upload time, the upload validation fails silently.
+
+Wait 1-2 seconds after Phase 2/2.5 completes, then upload:
+Use `inputElement` from `fileUploadSelectors` (returned by form-filler.js) for a precise selector:
 ```
-browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="input[type=file]" timeoutMs=60000 profile="lever"
+browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000 profile="lever"
 ```
-Or use `inputRef` from `fileUploadSelectors` if available.
+If `inputElement` is not available, fallback to `element="input[type=file]"`.
+
+**After upload, ALWAYS run verify-upload.js** to re-dispatch React events:
+```
+browser act kind=evaluate script="<contents of scripts/verify-upload.js>" timeoutMs=10000 profile="lever"
+```
+Check the returned JSON: if `verified: false` or errors mention validation, take a snapshot and retry upload.
 
 ### Phase 4: Custom Questions
 If `customQuestions[]` is non-empty:

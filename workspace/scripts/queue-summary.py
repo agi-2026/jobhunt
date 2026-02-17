@@ -23,6 +23,9 @@ import re
 
 QUEUE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'job-queue.md')
 
+# Companies that should never appear in --actionable output (Howard applies manually)
+NO_AUTO_COMPANIES = {'openai', 'databricks'}
+
 def parse_queue_compact():
     with open(QUEUE_PATH, 'r') as f:
         content = f.read()
@@ -104,6 +107,12 @@ def parse_queue_compact():
             elif 'DO NOT AUTO-APPLY' in stripped or 'OPENAI LIMIT' in stripped or 'Auto-Apply: NO' in stripped:
                 current_job['no_auto'] = True
 
+    # Company-level NO-AUTO: mark matching jobs regardless of inline tags
+    for section in sections.values():
+        for job in section:
+            if job.get('company', '').lower() in NO_AUTO_COMPANIES:
+                job['no_auto'] = True
+
     if current_job:
         sections[current_job.get('_section', current_section)].append(current_job)
 
@@ -184,14 +193,14 @@ def main():
     if ats_filter:
         ATS_PATTERNS = {
             'ashby': ['ashbyhq.com'],
-            'greenhouse': ['greenhouse.io'],
+            'greenhouse': ['greenhouse.io', 'gh_jid='],
             'lever': ['lever.co'],
         }
         patterns = ATS_PATTERNS.get(ats_filter)
         if patterns:
             jobs = [j for j in jobs if any(p in j.get('url', '') for p in patterns)]
         elif ats_filter == 'other':
-            all_known = ['ashbyhq.com', 'greenhouse.io', 'lever.co']
+            all_known = ['ashbyhq.com', 'greenhouse.io', 'gh_jid=', 'lever.co']
             jobs = [j for j in jobs if not any(p in j.get('url', '') for p in all_known)]
 
     for job in jobs[:top_n]:

@@ -56,23 +56,37 @@ Greenhouse uses React-select combobox components extensively. For EACH entry in 
 1. Click the combobox ref to open the dropdown
 2. Type the `targetValue` text
 3. Wait 500ms for the filter to populate
-4. Press Enter to select the first match
-5. Take snapshot to verify selection
+4. **If dropdown shows 0 results**: clear the text, try each value from `alternativeValues[]` until one matches
+5. Press Enter to select the first match
+6. Take snapshot to verify selection
 
 **Common Greenhouse comboboxes:**
 - Phone country code → type "United States", Enter
 - Work authorization → type "Yes", Enter
 - Visa sponsorship → type "Yes", Enter
 - Gender/Race → type "Decline", Enter
-- Disability → type "I do not wish", Enter
+- Disability → type "wish to answer", Enter. If 0 results → try "don't wish" → "prefer not" → "decline"
 
 ### Phase 4: Resume Upload
-Greenhouse uses button-based uploads ("Attach" button). The `input[type=file]` may be hidden.
+Greenhouse uses button-based uploads ("Attach" button) with a hidden `input[type=file]`.
+
+**Preferred method** — use `inputElement` from `fileUploadSelectors` (the hidden file input found by form-filler.js):
+```
+browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000 profile="greenhouse"
+```
+**Fallback** — if `inputElement` is null (no hidden input found), use the button ref:
 ```
 browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] ref="<attach-button-ref>" timeoutMs=60000 profile="greenhouse"
 ```
-If "file already uploaded" in skipped results: skip upload.
-**NEVER click the Attach button with a regular click** — use the upload action.
+
+**After upload, ALWAYS run verify-upload.js** to re-dispatch React events:
+```
+browser act kind=evaluate script="<contents of scripts/verify-upload.js>" timeoutMs=10000 profile="greenhouse"
+```
+Check the returned JSON: if `verified: false` or errors mention validation, take a snapshot and retry.
+
+If "file already uploaded" in skipped results: skip upload entirely.
+**NEVER click the Attach button with a regular click** — always use the upload action.
 
 ### Phase 5: Custom Questions
 If `customQuestions[]` is non-empty:
@@ -94,10 +108,16 @@ After submit, if "verification code" or "security code" text appears:
    exec: gog gmail search 'from:greenhouse subject:security code' --account cheng.howard1@gmail.com --json
    ```
 3. Read the latest thread to extract the **8-character alphanumeric code**
-4. Type the first character into the first textbox (the rest auto-advance)
-5. Click Submit/Verify
+4. **Fill code using atomic script (DO NOT type characters one-by-one):**
+   a. Set the code: `browser act kind=evaluate script="window.__VERIFY_CODE = '<CODE>'" profile="greenhouse"`
+   b. Read `scripts/greenhouse-verify-code.js` and run via `browser act kind=evaluate script="..." profile="greenhouse"`
+   c. Parse returned JSON — if `filled: true`, proceed. If `error`, fall back to step 4d.
+   d. **Fallback only:** Take snapshot, find the FIRST verification code input box (small single-char inputs near "verification code" text at BOTTOM of page — NOT regular form fields at top), type code character-by-character into those specific inputs.
+5. Click Submit/Verify button
 6. Verify "Thank you for applying" confirmation page
 7. If no email after 30s: retry search once. Still nothing: WhatsApp Howard, mark SKIPPED.
+
+**CRITICAL:** The verification code boxes are at the BOTTOM of the page near the submit area. Do NOT type into any form fields at the top of the page. The code inputs are small single-character boxes (maxlength=1) grouped together.
 
 ### Phase 7: Post-Submit
 ```

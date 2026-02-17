@@ -44,6 +44,22 @@ COMPANY_INFO = {
     'mistral': {'name': 'Mistral AI', 'info': 'Frontier AI lab ($6.2B valuation)', 'score': 100, 'h1b': 'Likely'},
     'palantir': {'name': 'Palantir', 'info': 'Data analytics ($50B+ mcap)', 'score': 80, 'h1b': 'Confirmed'},
     'zoox': {'name': 'Zoox (Amazon)', 'info': 'Autonomous vehicles, Amazon subsidiary', 'score': 80, 'h1b': 'Confirmed'},
+    # Added 2026-02-16
+    'hive': {'name': 'Hive', 'info': 'Cloud AI platform ($2B+, General Catalyst)', 'score': 80, 'h1b': 'Likely'},
+    # 'laminiai': removed — slug not found on Lever
+    'genbio': {'name': 'GenBio AI', 'info': 'Foundation models for biology', 'score': 70, 'h1b': 'Likely'},
+    'trellis': {'name': 'Trellis', 'info': 'AI document processing (YC-backed)', 'score': 70, 'h1b': 'Likely'},
+    # Added 2026-02-16 (batch ATS detection — 8 companies)
+    'shieldai': {'name': 'Shield AI', 'info': 'Autonomous defense ($4B+, a16z)', 'score': 85, 'h1b': 'Likely'},
+    'kumo': {'name': 'Kumo', 'info': 'Graph neural network AI ($110M, Sequoia)', 'score': 80, 'h1b': 'Likely'},
+    'vergesense': {'name': 'VergeSense', 'info': 'Workplace analytics AI ($67M)', 'score': 65, 'h1b': 'Unknown'},
+    'osaro': {'name': 'Osaro', 'info': 'Robotic AI perception ($40M)', 'score': 75, 'h1b': 'Likely'},
+    'deepgenomics': {'name': 'Deep Genomics', 'info': 'AI therapeutics ($180M)', 'score': 75, 'h1b': 'Likely'},
+    'rigetti': {'name': 'Rigetti Computing', 'info': 'Quantum computing ($2B raised)', 'score': 75, 'h1b': 'Likely'},
+    'weride': {'name': 'WeRide', 'info': 'Autonomous vehicles ($5B mcap)', 'score': 80, 'h1b': 'Likely'},
+    'curai': {'name': 'Curai Health', 'info': 'AI primary care ($43M, Khosla)', 'score': 70, 'h1b': 'Likely'},
+    # VC portfolio companies (a16z + Sequoia, detected 2026-02-16)
+    'shieldai': {'name': 'Shield AI', 'info': 'Defense AI drones (a16z, $240M Series F)', 'score': 80, 'h1b': 'Confirmed'},
 }
 
 def fetch_jobs(slug):
@@ -147,7 +163,7 @@ def is_us_or_remote(job):
     location = job.get('categories', {}).get('location', '').lower()
     all_locations = job.get('categories', {}).get('allLocations', [])
     workplace = job.get('workplaceType', '').lower()
-    country = job.get('country', '').upper()
+    country = (job.get('country') or '').upper()
 
     if workplace == 'remote' or 'remote' in location:
         return True

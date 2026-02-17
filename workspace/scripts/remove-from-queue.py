@@ -10,12 +10,13 @@ Usage:
 --applied: mark as APPLIED in dedup (default: SKIPPED)
 --search: list matching jobs without removing
 """
-import sys, os, re
+import sys, os, re, fcntl
 from datetime import datetime
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, "job-queue.md")
 DEDUP_PATH = os.path.join(WORKSPACE, "dedup-index.md")
+LOCK_PATH = os.path.join(WORKSPACE, ".queue.lock")
 
 def search_queue(keyword):
     with open(QUEUE_PATH) as f:
@@ -111,11 +112,17 @@ def main():
             print(f"  {title}")
             print(f"    {url}")
         return
-    
-    if len(args) >= 2 and not args[0].startswith('http'):
-        remove_job(args[0], args[1], mark_applied)
-    else:
-        remove_job(args[0], mark_applied=mark_applied)
+
+    # Acquire exclusive lock for write operations
+    with open(LOCK_PATH, "w") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        try:
+            if len(args) >= 2 and not args[0].startswith('http'):
+                remove_job(args[0], args[1], mark_applied)
+            else:
+                remove_job(args[0], mark_applied=mark_applied)
+        finally:
+            fcntl.flock(lockf, fcntl.LOCK_UN)
 
 if __name__ == "__main__":
     main()

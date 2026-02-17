@@ -6,27 +6,22 @@ Usage: python3 scripts/mark-applied.py "<url>" ["<company>"] ["<title>"]
 import sys
 import re
 import os
+import fcntl
 from datetime import datetime
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, "job-queue.md")
 DEDUP_PATH = os.path.join(WORKSPACE, "dedup-index.md")
+LOCK_PATH = os.path.join(WORKSPACE, ".queue.lock")
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 scripts/mark-applied.py '<url>' ['<company>'] ['<title>']")
-        sys.exit(1)
-    
-    url = sys.argv[1].strip().rstrip("/")
-    company = sys.argv[2] if len(sys.argv) > 2 else ""
-    title = sys.argv[3] if len(sys.argv) > 3 else ""
+def _do_mark_applied(url, company, title):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
+
     # 1. Update job-queue.md: REMOVE the entry from PENDING section entirely
     queue_updated = False
     with open(QUEUE_PATH, "r") as f:
         content = f.read()
-    
+
     lines = content.split('\n')
     url_variants = [url, url + "/application", url.replace("/application", "")]
     i = 0
@@ -44,21 +39,21 @@ def main():
             i = block_end
         else:
             i += 1
-    
+
     if queue_updated:
         with open(QUEUE_PATH, "w") as f:
             f.write('\n'.join(lines))
         print(f"QUEUE: Marked COMPLETED")
     else:
         print(f"QUEUE: Already COMPLETED or not found")
-    
+
     # 2. Update dedup-index.md: change PENDING → APPLIED
     dedup_updated = False
     url_variants = [url, url + "/application", url.replace("/application", "")]
-    
+
     with open(DEDUP_PATH, "r") as f:
         dedup_lines = f.readlines()
-    
+
     seen_urls = set()
     new_dedup_lines = []
     for line in dedup_lines:
@@ -87,22 +82,39 @@ def main():
                 break
         if not matched:
             new_dedup_lines.append(line)
-    
+
     # If URL not in dedup at all, add it
     norm_url = url.replace("/application", "")
     if norm_url not in seen_urls:
         new_entry = f"{url} | {company} | {title} | APPLIED | {datetime.now().strftime('%Y-%m-%d')}\n"
         new_dedup_lines.append(new_entry)
         dedup_updated = True
-    
+
     if dedup_updated:
         with open(DEDUP_PATH, "w") as f:
             f.writelines(new_dedup_lines)
         print(f"DEDUP: Updated to APPLIED")
     else:
         print(f"DEDUP: Already APPLIED")
-    
+
     print(f"DONE: {company} — {title}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/mark-applied.py '<url>' ['<company>'] ['<title>']")
+        sys.exit(1)
+
+    url = sys.argv[1].strip().rstrip("/")
+    company = sys.argv[2] if len(sys.argv) > 2 else ""
+    title = sys.argv[3] if len(sys.argv) > 3 else ""
+
+    with open(LOCK_PATH, "w") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        try:
+            _do_mark_applied(url, company, title)
+        finally:
+            fcntl.flock(lockf, fcntl.LOCK_UN)
 
 if __name__ == "__main__":
     main()

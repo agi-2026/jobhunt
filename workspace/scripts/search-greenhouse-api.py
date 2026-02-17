@@ -56,6 +56,61 @@ COMPANY_INFO = {
     'blackforestlabs': {'info': 'Stable Diffusion creators, FLUX', 'score': 80, 'h1b': 'Unknown'},
     'deepmind': {'info': 'Google DeepMind, top AI lab', 'score': 100, 'h1b': 'Confirmed'},
     'recursionpharmaceuticals': {'info': 'AI biotech ($6B mcap)', 'score': 80, 'h1b': 'Likely'},
+    # Added 2026-02-16
+    'togetherai': {'info': 'Open-source AI, model training/inference ($1.25B)', 'score': 90, 'h1b': 'Likely'},
+    'fireworksai': {'info': 'AI inference platform ($4B, PyTorch founders)', 'score': 90, 'h1b': 'Likely'},
+    'goodfire': {'info': 'AI interpretability ($1.25B, Anthropic-backed)', 'score': 80, 'h1b': 'Likely'},
+    'runwayml': {'info': 'Generative AI for video ($4B, Google/NVIDIA)', 'score': 90, 'h1b': 'Likely'},
+    'cerebrassystems': {'info': 'AI chip/compute ($23B, preparing IPO)', 'score': 90, 'h1b': 'Likely'},
+    # perplexityai, meshy: slugs not found on Greenhouse API
+    # Added 2026-02-16 (batch ATS detection — 38 companies)
+    'heygen': {'info': 'AI video avatars ($440M, Benchmark)', 'score': 85, 'h1b': 'Likely'},
+    'inflectionai': {'info': 'AI personal assistant, Pi ($1.5B, Gates/NVIDIA)', 'score': 90, 'h1b': 'Likely'},
+    'xai': {'info': 'Elon Musk AI lab, Grok ($50B+)', 'score': 95, 'h1b': 'Likely'},
+    'hebbia': {'info': 'AI knowledge work ($700M, a16z)', 'score': 85, 'h1b': 'Likely'},
+    'sambanovasystems': {'info': 'AI hardware/cloud ($5B+)', 'score': 85, 'h1b': 'Likely'},
+    'snorkelai': {'info': 'Data-centric AI ($1B+, Greylock)', 'score': 85, 'h1b': 'Likely'},
+    'stackblitz': {'info': 'Web dev AI (Bolt, WebContainers)', 'score': 75, 'h1b': 'Likely'},
+    'vivodyne': {'info': 'AI-driven biology ($55M, Founders Fund)', 'score': 70, 'h1b': 'Likely'},
+    'cresta': {'info': 'AI contact center ($225M, Greylock)', 'score': 80, 'h1b': 'Likely'},
+    'thatch': {'info': 'Health insurance tech ($48M)', 'score': 65, 'h1b': 'Likely'},
+    'instawork': {'info': 'Gig economy AI marketplace ($160M)', 'score': 70, 'h1b': 'Likely'},
+    'assemblyai': {'info': 'Speech-to-text AI ($115M)', 'score': 80, 'h1b': 'Likely'},
+    'mindsdb': {'info': 'AI in databases ($75M)', 'score': 70, 'h1b': 'Likely'},
+    'polyai': {'info': 'Enterprise voice AI ($64M, Khosla)', 'score': 80, 'h1b': 'Likely'},
+    'marqvision': {'info': 'AI brand protection ($42M)', 'score': 65, 'h1b': 'Unknown'},
+    'vizai': {'info': 'AI medical imaging ($252M, Tiger Global)', 'score': 75, 'h1b': 'Likely'},
+    'optimaldynamics': {'info': 'AI logistics optimization ($70M, Coatue)', 'score': 70, 'h1b': 'Likely'},
+    'labelbox': {'info': 'AI data labeling ($188M, a16z)', 'score': 80, 'h1b': 'Likely'},
+    'veriff': {'info': 'AI identity verification ($100M+)', 'score': 70, 'h1b': 'Unknown'},
+    'saltsecurity': {'info': 'API security AI ($271M, Sequoia)', 'score': 70, 'h1b': 'Likely'},
+    'moveworks': {'info': 'IT AI automation ($305M, Sapphire)', 'score': 80, 'h1b': 'Likely'},
+    'neuralink': {'info': 'Brain-computer interface (Elon Musk)', 'score': 90, 'h1b': 'Likely'},
+    'dialpad': {'info': 'AI communications ($230M)', 'score': 75, 'h1b': 'Likely'},
+    'dynotherapeutics': {'info': 'AI drug discovery, Harvard spinout', 'score': 70, 'h1b': 'Likely'},
+    'dominodatalab': {'info': 'MLOps platform ($553M, Sequoia)', 'score': 80, 'h1b': 'Likely'},
+    'observeai': {'info': 'Contact center AI ($214M, Zoom)', 'score': 75, 'h1b': 'Likely'},
+    'sisense': {'info': 'Analytics AI ($360M, Insight)', 'score': 70, 'h1b': 'Likely'},
+    'atomwise': {'info': 'AI drug discovery ($174M)', 'score': 70, 'h1b': 'Likely'},
+    'graphcore': {'info': 'AI accelerator chips ($700M, SoftBank)', 'score': 80, 'h1b': 'Likely'},
+    'iris': {'info': 'Drone AI detect-and-avoid ($50M)', 'score': 70, 'h1b': 'Likely'},
+    'pindropsecurity': {'info': 'Voice fraud AI ($213M, Citi)', 'score': 70, 'h1b': 'Likely'},
+    'stripe': {'info': 'Payments/fintech ($65B, AI features)', 'score': 90, 'h1b': 'Confirmed'},
+    'dropbox': {'info': 'Cloud storage, Dash AI ($8B mcap)', 'score': 80, 'h1b': 'Confirmed'},
+    'pinterest': {'info': 'Visual discovery, AI search ($17B mcap)', 'score': 80, 'h1b': 'Confirmed'},
+    'waymo': {'info': 'Autonomous vehicles (Alphabet)', 'score': 90, 'h1b': 'Confirmed'},
+    'robinhood': {'info': 'Fintech, AI features ($20B+ mcap)', 'score': 80, 'h1b': 'Confirmed'},
+    'duolingo': {'info': 'AI language learning ($12B mcap)', 'score': 80, 'h1b': 'Confirmed'},
+    'linkedin': {'info': 'Professional network (Microsoft)', 'score': 80, 'h1b': 'Confirmed'},
+    # VC portfolio companies (a16z + Sequoia, detected 2026-02-16)
+    'descript': {'info': 'AI video/audio editing (a16z)', 'score': 80, 'h1b': 'Likely'},
+    'fal': {'info': 'AI inference infrastructure (Sequoia)', 'score': 85, 'h1b': 'Likely'},
+    'gensyn': {'info': 'Distributed ML compute (Sequoia)', 'score': 80, 'h1b': 'Likely'},
+    'chainguard': {'info': 'Supply chain security (Sequoia)', 'score': 70, 'h1b': 'Likely'},
+    'metronome': {'info': 'Product launch/pricing platform (Sequoia)', 'score': 65, 'h1b': 'Likely'},
+    'gleanwork': {'info': 'Enterprise AI search ($150M Series F, Sequoia)', 'score': 90, 'h1b': 'Confirmed'},
+    'hextechnologies': {'info': 'Data science/analytics workspace (a16z+Sequoia)', 'score': 75, 'h1b': 'Likely'},
+    'blackforestlabs': {'info': 'Flux image generation models (a16z)', 'score': 95, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):
@@ -149,28 +204,64 @@ def add_to_queue(job_json):
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return f'ERROR: {e}'
 
-def main():
-    if len(sys.argv) < 2:
-        print('Usage: python3 search-greenhouse-api.py <company-slug> [--add]')
-        print('Example: python3 search-greenhouse-api.py anthropic --add')
-        sys.exit(1)
+def is_us_or_remote(job):
+    """Filter for US locations or remote roles accessible from the US."""
+    location = job.get('location', {}).get('name', '').lower()
 
-    slug = sys.argv[1].strip().lower()
-    auto_add = '--add' in sys.argv
+    # Non-US locations — skip
+    non_us = ['united kingdom', 'london', 'uk', 'germany', 'berlin', 'munich',
+              'france', 'paris', 'japan', 'tokyo', 'india', 'bangalore', 'mumbai',
+              'brazil', 'australia', 'sydney', 'china', 'shanghai', 'beijing',
+              'israel', 'tel aviv', 'netherlands', 'amsterdam', 'ireland', 'dublin',
+              'sweden', 'stockholm', 'spain', 'madrid', 'italy', 'milan',
+              'singapore', 'canada', 'toronto', 'vancouver', 'korea', 'seoul',
+              'dubai', 'uae', 'switzerland', 'zurich', 'poland', 'warsaw',
+              'portugal', 'lisbon', 'czech', 'prague', 'argentina', 'mexico',
+              'colombia', 'chile', 'south africa', 'nigeria', 'kenya',
+              'taiwan', 'hong kong', 'vietnam', 'thailand', 'philippines',
+              'indonesia', 'malaysia', 'new zealand', 'denmark', 'copenhagen',
+              'norway', 'oslo', 'finland', 'helsinki', 'austria', 'vienna',
+              'belgium', 'brussels', 'romania', 'bucharest', 'hungary', 'budapest']
+    if any(kw in location for kw in non_us):
+        return False
 
-    # Fetch all jobs
+    # US keywords
+    us_keywords = ['united states', 'san francisco', 'new york', 'nyc',
+                   'bay area', 'seattle', 'austin', 'boston', 'chicago', 'los angeles',
+                   'palo alto', 'mountain view', 'menlo park', 'sunnyvale',
+                   'washington', 'denver', 'portland', 'atlanta', 'miami',
+                   'philadelphia', 'phoenix', 'dallas', 'houston', 'san jose',
+                   'san diego', 'pittsburgh', 'boulder', 'raleigh', 'durham',
+                   'cambridge', 'somerville', 'brooklyn', 'manhattan',
+                   ', ca', ', ny', ', wa', ', tx', ', ma', ', il', ', co',
+                   ', pa', ', ga', ', fl', ', va', ', nc', ', or', ', az',
+                   ', ut', ', md', ', oh', ', mn', ', mi', ', ct', ', nj',
+                   'usa', 'u.s.']
+    if any(kw in location for kw in us_keywords):
+        return True
+
+    # Remote with no explicit non-US indicator
+    if 'remote' in location:
+        return True
+
+    # Empty or ambiguous location — include (some companies don't set location)
+    if not location or location == 'unknown':
+        return True
+
+    return False
+
+def search_company(slug, auto_add):
+    """Search a single company and return (new_count, dup_count)."""
     all_jobs = fetch_jobs(slug)
     if not all_jobs:
         print(f'No jobs found for {slug}')
-        sys.exit(0)
+        return 0, 0
 
-    # Filter relevant
-    relevant = [j for j in all_jobs if is_relevant(j)]
-
+    relevant = [j for j in all_jobs if is_relevant(j) and is_us_or_remote(j)]
     company_name = all_jobs[0].get('company_name', slug) if all_jobs else slug
     info = COMPANY_INFO.get(slug, {})
 
-    print(f'FOUND {len(relevant)} relevant jobs at {company_name} (of {len(all_jobs)} total)')
+    print(f'FOUND {len(relevant)} relevant US/remote jobs at {company_name} (of {len(all_jobs)} total)')
 
     new_count = 0
     dup_count = 0
@@ -181,7 +272,6 @@ def main():
         location = job.get('location', {}).get('name', 'Unknown')
         total, breakdown = score_job(job, slug)
 
-        # Check dedup
         if check_dedup(url):
             dup_count += 1
             if not auto_add:
@@ -212,7 +302,6 @@ def main():
 
     print(f'\nSummary: {new_count} new, {dup_count} duplicate (of {len(relevant)} relevant)')
 
-    # Log yield for dynamic scheduling
     if auto_add:
         try:
             subprocess.run(
@@ -222,6 +311,29 @@ def main():
             )
         except Exception:
             pass
+
+    return new_count, dup_count
+
+
+def main():
+    auto_add = '--add' in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+
+    if '--all' in sys.argv:
+        total_new = 0
+        total_dup = 0
+        for slug in COMPANY_INFO:
+            new, dup = search_company(slug, auto_add)
+            total_new += new
+            total_dup += dup
+        print(f'\nTOTAL: {total_new} new, {total_dup} duplicate across {len(COMPANY_INFO)} companies')
+    elif args:
+        slug = args[0].strip().lower()
+        search_company(slug, auto_add)
+    else:
+        print('Usage: python3 search-greenhouse-api.py <company-slug> [--add]')
+        print('       python3 search-greenhouse-api.py --all [--add]')
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
