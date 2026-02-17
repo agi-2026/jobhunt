@@ -122,6 +122,57 @@ def get_pipeline_health():
     except Exception as e:
         return {'error': str(e)}, [f"ERROR: Cannot read tracker: {e}"]
 
+def get_auth_health():
+    """Check if the Anthropic API token is still valid."""
+    import urllib.request
+    import urllib.error
+    import ssl
+
+    alerts = []
+    auth_profiles_path = os.path.join(OPENCLAW_DIR, 'agents', 'main', 'agent', 'auth-profiles.json')
+    try:
+        with open(auth_profiles_path, 'r') as f:
+            profiles = json.load(f)
+        token = profiles.get('profiles', {}).get('anthropic:default', {}).get('token', '')
+        if not token:
+            alerts.append("CRITICAL: No Anthropic token configured")
+            return {'status': 'missing'}, alerts
+
+        ctx = ssl.create_default_context()
+        payload = json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}]
+        }).encode()
+
+        # Try Bearer (setup-token/OAuth) then x-api-key
+        for auth_headers in [
+            {"Authorization": f"Bearer {token}"},
+            {"x-api-key": token},
+        ]:
+            try:
+                headers = {"anthropic-version": "2023-06-01",
+                           "Content-Type": "application/json", **auth_headers}
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/messages",
+                    data=payload, headers=headers)
+                urllib.request.urlopen(req, timeout=10, context=ctx)
+                return {'status': 'valid'}, []
+            except urllib.error.HTTPError as e:
+                if e.code in (400, 429):
+                    return {'status': 'valid'}, []
+                elif e.code == 401:
+                    continue  # Try next auth method
+                else:
+                    return {'status': f'http_{e.code}'}, []
+
+        alerts.append('CRITICAL: Anthropic token EXPIRED (401). Run: python3 scripts/refresh-token.py set "<new-token>"')
+        return {'status': 'expired'}, alerts
+    except Exception as e:
+        alerts.append(f"WARNING: Cannot verify Anthropic token: {e}")
+        return {'status': 'unknown'}, alerts
+
+
 def main():
     alert_only = '--alert' in sys.argv
     json_mode = '--json' in sys.argv
@@ -129,8 +180,9 @@ def main():
     agents, agent_alerts = get_agent_health()
     queue, queue_alerts = get_queue_health()
     pipeline, pipeline_alerts = get_pipeline_health()
+    auth, auth_alerts = get_auth_health()
 
-    all_alerts = agent_alerts + queue_alerts + pipeline_alerts
+    all_alerts = auth_alerts + agent_alerts + queue_alerts + pipeline_alerts
 
     # H-1B countdown
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -141,6 +193,7 @@ def main():
     if json_mode:
         print(json.dumps({
             'timestamp': datetime.now().isoformat(),
+            'auth': auth,
             'agents': agents,
             'queue': queue,
             'pipeline': pipeline,
@@ -162,6 +215,9 @@ def main():
         for a in all_alerts:
             print(f"  {a}")
         print()
+
+    auth_icon = "OK" if auth.get('status') == 'valid' else "EXPIRED" if auth.get('status') == 'expired' else auth.get('status', '?').upper()
+    print(f"AUTH: {auth_icon}\n")
 
     print("AGENTS:")
     for a in agents:

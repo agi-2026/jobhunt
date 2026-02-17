@@ -59,7 +59,28 @@ COMPANY_INFO = {
     'weride': {'name': 'WeRide', 'info': 'Autonomous vehicles ($5B mcap)', 'score': 80, 'h1b': 'Likely'},
     'curai': {'name': 'Curai Health', 'info': 'AI primary care ($43M, Khosla)', 'score': 70, 'h1b': 'Likely'},
     # VC portfolio companies (a16z + Sequoia, detected 2026-02-16)
-    'shieldai': {'name': 'Shield AI', 'info': 'Defense AI drones (a16z, $240M Series F)', 'score': 80, 'h1b': 'Confirmed'},
+    # 'shieldai' duplicate removed — already above
+    # Added 2026-02-17 (batch Lever expansion — 20 companies)
+    'field-ai': {'name': 'Field AI', 'info': 'Robotics + foundation models, autonomous systems', 'score': 85, 'h1b': 'Likely'},
+    'collate': {'name': 'Collate', 'info': 'AI doc generation for life sciences (YC, Redpoint, $30M+)', 'score': 80, 'h1b': 'Likely'},
+    'connectly': {'name': 'Connectly', 'info': 'AI conversational commerce, Series B (Meta/Google team)', 'score': 75, 'h1b': 'Likely'},
+    'asapp-2': {'name': 'ASAPP', 'info': 'Real-time voice AI platform, ASR/TTS', 'score': 80, 'h1b': 'Likely'},
+    'woven-by-toyota': {'name': 'Woven by Toyota', 'info': 'Autonomous driving, world foundation models', 'score': 85, 'h1b': 'Confirmed'},
+    'voleon': {'name': 'The Voleon Group', 'info': 'AI/ML for quantitative finance', 'score': 80, 'h1b': 'Likely'},
+    'artera': {'name': 'Artera', 'info': 'Medical AI, deep learning biomarkers for cancer', 'score': 75, 'h1b': 'Likely'},
+    'glass-health-inc': {'name': 'Glass Health', 'info': 'AI clinical decision support (YC, $6.5M)', 'score': 75, 'h1b': 'Likely'},
+    'AIFund': {'name': 'AI Fund', 'info': "Andrew Ng's venture studio, multi-portfolio AI", 'score': 80, 'h1b': 'Likely'},
+    'Regard': {'name': 'Regard', 'info': 'Generative AI for clinical healthcare', 'score': 75, 'h1b': 'Likely'},
+    'matchgroup': {'name': 'Match Group', 'info': 'AI-first dating (Tinder/Hinge), recommendation ML', 'score': 75, 'h1b': 'Confirmed'},
+    'RadicalAI': {'name': 'Radical AI', 'info': 'AI for materials science, generative models', 'score': 80, 'h1b': 'Likely'},
+    'npowermedicine': {'name': 'N-Power Medicine', 'info': 'AI-driven clinical trials', 'score': 70, 'h1b': 'Likely'},
+    'imo-online': {'name': 'IMO Health', 'info': 'AI healthcare decision-making', 'score': 70, 'h1b': 'Likely'},
+    'appzen': {'name': 'AppZen', 'info': 'Deep learning NLP/document AI for finance', 'score': 70, 'h1b': 'Likely'},
+    'pryon': {'name': 'Pryon', 'info': 'Generative + agentic AI, enterprise knowledge', 'score': 75, 'h1b': 'Likely'},
+    'quizlet-2': {'name': 'Quizlet', 'info': 'AI-powered learning, RL/personalization', 'score': 70, 'h1b': 'Likely'},
+    'apolloresearch': {'name': 'Apollo Research', 'info': 'AI safety evals, frontier model research', 'score': 80, 'h1b': 'Likely'},
+    'dexterity': {'name': 'Dexterity', 'info': 'CV + ML for robotic manipulation', 'score': 80, 'h1b': 'Likely'},
+    'rivr': {'name': 'RIVR', 'info': 'Wheeled-legged robotics, imitation learning', 'score': 70, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):

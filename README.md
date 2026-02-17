@@ -6,37 +6,39 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                   JobHunt v5 — Parallel Application Architecture         │
+│                   JobHunt v6 — Hardened Parallel Architecture             │
 │                                                                          │
 │  Search Agent (every 30 min)                                             │
 │  ┌──────────────────────────────────────────┐                            │
-│  │ API-first: Ashby + Greenhouse + Lever    │                            │
-│  │ 172 companies across 3 ATS types         │──▶ job-queue.md            │
-│  │ HN Who is Hiring (monthly)               │    (priority sorted)       │
+│  │ API-first: Ashby + Greenhouse + HN       │                            │
+│  │ 157+ companies across 2 ATS types        │──▶ job-queue.md            │
+│  │ Lever DISABLED (hCaptcha blocks all)     │    (priority sorted)       │
 │  └──────────────────────────────────────────┘                            │
 │                                                                          │
 │  Application Orchestrator (every 5 min)                                  │
 │  ┌──────────────────────────────────────────┐                            │
 │  │ 1. Batch preflight (remove dead links)   │                            │
 │  │ 2. Check locks + queue per ATS type      │                            │
-│  │ 3. Spawn parallel subagents ─────────────┼──┐                         │
+│  │ 3. Check skip-companies.json             │                            │
+│  │ 4. Spawn parallel subagents ─────────────┼──┐                         │
 │  └──────────────────────────────────────────┘  │                         │
 │                                                │                         │
 │  Subagent Lane (true parallelism)              │                         │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐            │
-│  │ Ashby Agent     │ │ Greenhouse Agent│ │ Lever Agent     │            │
-│  │ browser :18801  │ │ browser :18802  │ │ browser :18803  │            │
-│  │ up to 3 apps    │ │ up to 3 apps   │ │ up to 3 apps    │            │
-│  │ form-filler.js  │ │ form-filler.js │ │ form-filler.js  │            │
-│  └────────┬────────┘ └───────┬────────┘ └────────┬────────┘            │
-│           └──────────────────┼───────────────────┘                      │
+│  ┌─────────────────┐ ┌─────────────────┐      │                         │
+│  │ Ashby Agent     │ │ Greenhouse Agent│  ┌────────────────┐            │
+│  │ browser :18801  │ │ browser :18802  │  │ Lever DISABLED │            │
+│  │ up to 3 apps    │ │ up to 3 apps   │  │ (hCaptcha)     │            │
+│  │ form-filler.js  │ │ form-filler.js │  └────────────────┘            │
+│  └────────┬────────┘ └───────┬────────┘                                │
+│           └──────────────────┘                                          │
 │                              ▼                                           │
 │                      job-tracker.md                                      │
 │                                                                          │
-│  ┌──────────────┐  ┌───────────┐  ┌──────────────┐                      │
-│  │Health Monitor│  │ Dashboard │  │   WhatsApp   │                      │
-│  │  (30m cycle) │  │   :8765   │  │ notifications│                      │
-│  └──────────────┘  └───────────┘  └──────────────┘                      │
+│  ┌──────────────┐  ┌───────────────────────┐  ┌──────────────┐          │
+│  │Health Monitor│  │ Dashboard :8765       │  │   WhatsApp   │          │
+│  │  (30m cycle) │  │ + Skip List mgmt     │  │ notifications│          │
+│  │  + Auth check│  │ + URL add bar        │  └──────────────┘          │
+│  └──────────────┘  └───────────────────────┘                            │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -44,35 +46,58 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude.
 
 | Agent | Schedule | Model | Job |
 |-------|----------|-------|-----|
-| **Search Agent** | Every 30 min | Sonnet 4.5 | Discovers jobs via Ashby/Greenhouse/Lever APIs + HN Hiring. Scores, deduplicates, adds to priority queue. |
-| **Application Orchestrator** | Every 5 min | Sonnet 4.5 | Checks locks and queues, spawns parallel ATS-specific subagents via `sessions_spawn`. |
+| **Search Agent** | Every 30 min | Sonnet 4.5 | Discovers jobs via Ashby/Greenhouse APIs + HN Hiring. Scores, deduplicates, adds to priority queue. |
+| **Application Orchestrator** | Every 5 min | Sonnet 4.5 | Checks locks, queues, and skip list, spawns parallel ATS-specific subagents via `sessions_spawn`. |
 | **Ashby Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Ashby jobs per cycle. Dedicated browser profile (port 18801). |
 | **Greenhouse Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Greenhouse jobs per cycle. Handles email verification. Dedicated browser (port 18802). |
-| **Lever Subagent** | On-demand | Sonnet 4.5 | Applies to up to 3 Lever jobs per cycle. Dedicated browser (port 18803). |
-| **Health Monitor** | Every 30 min | Haiku 4.5 | Checks for stuck agents, consecutive errors, queue issues. WhatsApp alerts only for critical issues. |
+| **~~Lever Subagent~~** | DISABLED | — | All Lever forms now require hCaptcha. Jobs remain in queue for manual application. |
+| **Health Monitor** | Every 30 min | Haiku 4.5 | Checks for stuck agents, consecutive errors, queue issues, auth token health. WhatsApp alerts only for critical issues. |
 
-**Typical daily output:** 50+ jobs discovered, 15+ applications submitted across 3 ATS types in parallel.
+**Typical daily output:** 50+ jobs discovered, 10+ applications submitted across Ashby and Greenhouse in parallel.
 
 ## Key Innovations
 
 ### Parallel Application via `sessions_spawn`
 
-OpenClaw's cron lane is serialized — jobs run one at a time. JobHunt works around this with an **orchestrator pattern**: a single cron job spawns up to 3 subagents that run truly in parallel on the subagent lane. Each subagent has its own browser profile and ATS-specific skill set.
+OpenClaw's cron lane is serialized — jobs run one at a time. JobHunt works around this with an **orchestrator pattern**: a single cron job spawns up to 2 subagents that run truly in parallel on the subagent lane. Each subagent has its own browser profile and ATS-specific skill set.
 
 **Before (v4):** 3 ATS agents run serially → ~45 min per cycle
 **After (v5):** 3 subagents run in parallel → ~15 min per cycle (limited by the slowest)
+**v6 update:** Lever disabled (hCaptcha) → 2 subagents (Ashby + Greenhouse). Lever jobs queued for manual apply.
 
 ### API-First Job Discovery
 
-No browser overhead for search. All 172 tracked companies are searched via their native ATS APIs:
+No browser overhead for search. Companies are searched via their native ATS APIs:
 
-| ATS | Companies | Method |
-|-----|-----------|--------|
-| Ashby | 98 | GraphQL API (`/api/posting-api/postings`) |
-| Greenhouse | 59 | JSON API (`/v1/boards/{slug}/jobs`) |
-| Lever | 15 | JSON API (`/v0/postings/{slug}`) |
+| ATS | Companies | Method | Status |
+|-----|-----------|--------|--------|
+| Ashby | 8 | GraphQL API (`/api/posting-api/postings`) | Active |
+| Greenhouse | 59+ | JSON API (`/v1/boards/{slug}/jobs`) | Active |
+| Lever | 15 | JSON API (`/v0/postings/{slug}`) | Disabled (hCaptcha) |
 
 New companies are added by simply editing the Python search scripts — no browser automation needed.
+
+### Skip List Management
+
+Companies that cannot be automated are tracked in `skip-companies.json` with categorized reasons:
+
+| Category | Example | Reason |
+|----------|---------|--------|
+| CSP Block | Stripe, Hex | Content Security Policy blocks Playwright navigation |
+| App Limit | OpenAI | 5 applications per 180 days — manual apply only |
+| Technical | Databricks, Meta | Cross-origin iframe or React file upload blocks automation |
+| CAPTCHA | Reka AI, Lever (all) | reCAPTCHA/hCaptcha blocks headless browsers |
+
+The skip list is managed via the dashboard UI and read by both `add-to-queue.py` (prevents re-adding) and the application agents (skips at runtime).
+
+### Auth Token Health
+
+Claude Max subscription setup-tokens (`sk-ant-oat01-*`) expire periodically. The health monitor now checks token validity via the Anthropic API and alerts on 401 errors. Token refresh workflow:
+```bash
+python3 scripts/refresh-token.py check          # Check current token
+python3 scripts/refresh-token.py set "<token>"   # Set new token
+# Then restart gateway
+```
 
 ### Deterministic Form Filling
 
@@ -107,19 +132,20 @@ With 3 subagents writing to `job-queue.md` and `dedup-index.md` simultaneously, 
 - **File locking** — `fcntl.flock()` prevents data corruption from parallel writes
 
 ### Observability
-- **Real-time dashboard** at `localhost:8765` — 5 tabs: Pending Queue, Manual Apply, In Progress, Completed, Skipped
+- **Real-time dashboard** at `localhost:8765` — 4 tabs: Pending Queue, Manual Apply, Applied (with stage tracking), Skip List
+- **URL input bar** — paste a job URL to add to queue or mark as applied directly
 - **WhatsApp notifications** — critical error alerts only (no spam)
 - **Session memory** — each agent appends to `memory/session-YYYY-MM-DD.md`
-- **Health monitoring** — consecutive error alerts, stuck agent detection
+- **Health monitoring** — consecutive error alerts, stuck agent detection, auth token health
 
 ## Supported ATS Platforms
 
-| Platform | API Search | Auto-Fill | Auto-Submit | Notes |
-|----------|-----------|-----------|-------------|-------|
-| Ashby | Yes (GraphQL) | Yes | Yes | Toggle buttons with full event chain |
-| Greenhouse | Yes (JSON) | Yes | Yes | Email verification auto-handled, MyGreenhouse autofill support |
-| Lever | Yes (JSON) | Yes | Yes | Playwright fallback for location fields |
-| Workday | No | No | No | Multi-page, requires account — manual only |
+| Platform | API Search | Auto-Fill | Auto-Submit | Status |
+|----------|-----------|-----------|-------------|--------|
+| Ashby | Yes (GraphQL) | Yes | Yes | Active — toggle buttons with full event chain |
+| Greenhouse | Yes (JSON) | Yes | Yes | Active — email verification auto-handled, MyGreenhouse autofill |
+| Lever | Yes (JSON) | Yes | No | **Disabled** — hCaptcha blocks all submissions (Feb 2026) |
+| Workday | No | No | No | Manual only — multi-page, requires account |
 | Custom ATS | No | No | No | 70+ companies tracked in manual-apply-priority.md |
 
 ## Prerequisites
@@ -239,7 +265,7 @@ jobhunt/
 ├── skills -> workspace/skills             # Symlink (subagent SKILL.md reads resolve here)
 │
 ├── dashboard/
-│   └── server.py                          # Web dashboard (5-tab: pending, manual, progress, completed, skipped)
+│   └── server.py                          # Web dashboard (4-tab: pending, manual, applied, skip list)
 │
 ├── workspace/                             # ← symlinked to ~/.openclaw/workspace/
 │   │
@@ -276,23 +302,32 @@ jobhunt/
 │   │   ├── verify-upload.js               # React event fix after resume upload
 │   │   ├── greenhouse-verify-code.js      # Greenhouse email verification code filler
 │   │   ├── subagent-lock.py               # File-based locking for parallel subagents
+│   │   ├── refresh-token.py               # Auth token check/refresh for Claude Max
 │   │   │
 │   │   │  # Monitoring
-│   │   ├── health-check.py                # System health monitor
+│   │   ├── health-check.py                # System health monitor (+ auth health)
 │   │   ├── read-memory.py                 # Multi-layer memory reader (hot/warm/stats)
 │   │   ├── analyze-logs.py                # Log analysis for improvements
 │   │   └── dynamic-scheduler.py           # Auto-adjust cron frequency by yield
 │   │
+│   ├── skip-companies.json                # Skip list (CSP, CAPTCHA, limits) — read by dashboard + agents
+│   │
 │   └── skills/                            # ATS-specific application skills
 │       ├── apply-ashby/
 │       │   ├── SKILL.md                   # Ashby-specific application instructions
-│       │   └── scripts/form-filler.js     # Ashby form filler (gitignored — personal data)
+│       │   └── scripts/
+│       │       ├── form-filler.js         # Ashby form filler (gitignored — personal data)
+│       │       └── verify-upload.js       # React upload event fix (copy of workspace/scripts/)
 │       ├── apply-greenhouse/
 │       │   ├── SKILL.md                   # Greenhouse-specific instructions (email verification, etc.)
-│       │   └── scripts/form-filler.js     # Greenhouse form filler (gitignored)
+│       │   └── scripts/
+│       │       ├── form-filler.js         # Greenhouse form filler (gitignored)
+│       │       └── verify-upload.js       # React upload event fix
 │       └── apply-lever/
-│           ├── SKILL.md                   # Lever-specific instructions
-│           └── scripts/form-filler.js     # Lever form filler (gitignored)
+│           ├── SKILL.md                   # Lever-specific instructions (DISABLED — hCaptcha)
+│           └── scripts/
+│               ├── form-filler.js         # Lever form filler (gitignored)
+│               └── verify-upload.js       # React upload event fix
 │
 └── cron/
     ├── jobs.json.example                  # Cron configuration template
@@ -326,19 +361,21 @@ jobhunt/
 The system runs as a **producer-consumer pipeline with parallel consumers**:
 
 1. **Search Agent (Producer)** runs every 30 minutes:
-   - Queries 172 companies across Ashby, Greenhouse, and Lever APIs
+   - Queries companies across Ashby and Greenhouse APIs
    - Scrapes HN Who is Hiring monthly via Algolia
    - Scores each job (0-400) based on recency, salary, company stage, and role match
    - Dedup-checks against existing applications
    - Adds new jobs to `job-queue.md` sorted by score
    - Filters non-US/non-remote jobs automatically (Greenhouse filter)
+   - Checks `skip-companies.json` to block known-bad companies
 
 2. **Application Orchestrator** runs every 5 minutes:
    - Runs `batch-preflight.py --all --remove` to clean dead links
-   - For each ATS type (ashby, greenhouse, lever):
+   - For each active ATS type (ashby, greenhouse):
      - Checks subagent lock — skips if a previous subagent is still running
      - Checks queue — skips if no actionable jobs for this ATS type
      - Spawns a subagent via `sessions_spawn` with the ATS-specific task
+   - Lever is disabled (hCaptcha blocks all submissions)
 
 3. **ATS Subagents** (spawned in parallel on the subagent lane):
    - Acquire a file lock for their ATS type
@@ -352,6 +389,7 @@ The system runs as a **producer-consumer pipeline with parallel consumers**:
 
 4. **Health Monitor** runs every 30 minutes:
    - Checks consecutive errors, stuck agents, queue health
+   - Validates auth token against Anthropic API (catches expired setup-tokens)
    - WhatsApp alerts only for critical issues
 
 ### Scoring Formula
@@ -390,15 +428,14 @@ Agents never read large files directly. Instead, they use exec scripts:
 
 ## Dashboard
 
-The dashboard at `http://localhost:8765` provides 5 tabs:
+The dashboard at `http://localhost:8765` provides 4 tabs:
 
 - **Pending Queue** — Jobs waiting to be applied to, sorted by score
-- **Manual Apply** — Companies with application limits or custom ATS (OpenAI, Waymo, etc.)
-- **In Progress** — Jobs currently being processed
-- **Completed** — Successfully submitted applications
-- **Skipped** — Jobs skipped (non-US, expired, already applied)
+- **Manual Apply** — Companies with application limits or custom ATS (OpenAI, Databricks, etc.)
+- **Applied** — All submitted applications with stage tracking (Applied → Phone Screen → Technical → Take Home → Onsite/Final → Offer/Rejected). Inline stage updates, search, and filter by stage.
+- **Skip List** — Companies blocked from automation (CSP, CAPTCHA, limits). Add/remove via UI, synced with `skip-companies.json`.
 
-Plus: pipeline stage counts, agent status from cron state, auto-refresh.
+Plus: URL input bar (paste a job URL to add to queue or mark applied), H-1B countdown timer, pipeline stage counts, agent status from cron state, auto-refresh every 30s.
 
 ## Customization
 

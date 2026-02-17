@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-Job Search Dashboard v2 — Local HTTP server
-Fixed: pipeline counts computed from actual entries, agent status from jobs.json,
-stage updates via API, health monitoring.
+Job Search Dashboard v3 — Simplified, focused UI
+3 tabs: Pending Queue, Manual Apply, Applied (with search + inline stage update)
 Run: python3 dashboard/server.py
 Open: http://localhost:8765
 """
 
 import http.server
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,48 +17,42 @@ WORKSPACE = Path.home() / ".openclaw" / "workspace"
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
-MANUAL_DEDUP_FILE = WORKSPACE / "manual-dedup.md"
+DEDUP_FILE = WORKSPACE / "dedup-index.md"
+MANUAL_APPLY_FILE = WORKSPACE / "manual-apply-priority.md"
 JOBS_JSON = OPENCLAW_DIR / "cron" / "jobs.json"
+SKIP_LIST_FILE = WORKSPACE / "skip-companies.json"
 
-H1B_DEADLINE = datetime(2026, 3, 15)
-OPT_EXPIRY = datetime(2026, 5, 31)
+# H-1B deadlines
+OFFER_DEADLINE = datetime(2026, 3, 6, 12, 0)   # Need offer by this date
+H1B_REG_DEADLINE = datetime(2026, 3, 19, 12, 0) # Final registration deadline
+
+NO_AUTO_COMPANIES = {"openai", "databricks"}
 
 
 def parse_queue(content: str) -> dict:
-    """Parse job-queue.md into structured sections."""
-    sections = {"pending": [], "manual_apply": [], "in_progress": [], "completed": [], "skipped": []}
-    stats_line = ""
+    """Parse job-queue.md into pending and manual_apply lists."""
+    sections = {"pending": [], "manual_apply": []}
     current_section = None
     current_job = None
 
     for line in content.split("\n"):
-        if line.startswith("- Pending:"):
-            stats_line = line.strip("- ")
-
         stripped = line.strip()
         if stripped == "## PENDING (sorted by priority score, highest first)":
             current_section = "pending"
             continue
-        elif stripped == "## IN PROGRESS":
-            current_section = "in_progress"
-            continue
-        elif stripped.startswith("## COMPLETED"):
-            current_section = "completed"
-            continue
-        elif stripped == "## SKIPPED":
-            current_section = "skipped"
-            continue
-        elif stripped.startswith("## ") and "DO NOT AUTO-APPLY" not in stripped:
-            if current_section and current_section != "pending":
-                current_section = None
-            continue
-
-        # Capture DO NOT AUTO-APPLY section header (must start with ##)
-        if stripped.startswith("## ") and "DO NOT AUTO-APPLY" in stripped:
+        elif stripped.startswith("## ") and "DO NOT AUTO-APPLY" in stripped:
             current_section = "pending_no_auto"
             continue
+        elif stripped.startswith("## "):
+            if current_job:
+                target = "manual_apply" if current_job.get("no_auto") else current_job.get("_section", "pending")
+                if target in sections:
+                    sections[target].append(current_job)
+                current_job = None
+            current_section = None
+            continue
 
-        if current_section in (None,):
+        if current_section is None:
             continue
 
         effective_section = "pending" if current_section == "pending_no_auto" else current_section
@@ -69,14 +61,14 @@ def parse_queue(content: str) -> dict:
         if score_match:
             if current_job:
                 target = "manual_apply" if current_job.get("no_auto") else current_job["_section"]
-                sections[target].append(current_job)
+                if target in sections:
+                    sections[target].append(current_job)
             current_job = {
                 "_section": effective_section,
                 "score": int(score_match.group(1)),
                 "company": score_match.group(2).strip(),
                 "title": score_match.group(3).strip(),
-                "url": "", "location": "", "salary": "", "h1b": "",
-                "status_detail": "", "discovered": "", "applied": "",
+                "url": "", "location": "", "h1b": "",
                 "no_auto": current_section == "pending_no_auto",
             }
             continue
@@ -86,53 +78,49 @@ def parse_queue(content: str) -> dict:
                 current_job["url"] = stripped.split("**URL:**")[1].strip()
             elif stripped.startswith("- **Location:**"):
                 current_job["location"] = stripped.split("**Location:**")[1].strip()
-            elif stripped.startswith("- **Salary:**"):
-                current_job["salary"] = stripped.split("**Salary:**")[1].strip()
             elif stripped.startswith("- **H-1B:**"):
                 current_job["h1b"] = stripped.split("**H-1B:**")[1].strip()
-            elif stripped.startswith("- **Status:**"):
-                current_job["status_detail"] = stripped.split("**Status:**")[1].strip()
-            elif stripped.startswith("- **Discovered:**"):
-                current_job["discovered"] = stripped.split("**Discovered:**")[1].strip()
-            elif stripped.startswith("- **Applied:**"):
-                current_job["applied"] = stripped.split("**Applied:**")[1].strip()
             elif "OPENAI LIMIT" in stripped or "Auto-Apply: NO" in stripped or "DATABRICKS" in stripped:
                 current_job["no_auto"] = True
 
     if current_job:
-        target = "manual_apply" if current_job.get("no_auto") else current_job["_section"]
-        sections[target].append(current_job)
+        target = "manual_apply" if current_job.get("no_auto") else current_job.get("_section", "pending")
+        if target in sections:
+            sections[target].append(current_job)
+
+    # Company-level NO-AUTO
+    new_pending = []
+    for job in sections["pending"]:
+        if job.get("company", "").lower() in NO_AUTO_COMPANIES:
+            job["no_auto"] = True
+            sections["manual_apply"].append(job)
+        else:
+            new_pending.append(job)
+    sections["pending"] = new_pending
 
     for section in sections.values():
         for job in section:
             job.pop("_section", None)
 
-    return {"stats": stats_line, "sections": sections}
+    return sections
 
 
 def parse_tracker(content: str) -> dict:
-    """Parse job-tracker.md — compute pipeline from actual entries."""
+    """Parse job-tracker.md for pipeline stages and entries."""
     entries = []
     current_entry = None
-    daily_stats = []
+    in_comment = False
 
     for line in content.split("\n"):
-        # Parse daily stats
-        daily_match = re.match(
-            r"\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|",
-            line,
-        )
-        if daily_match:
-            daily_stats.append({
-                "date": daily_match.group(1),
-                "found": int(daily_match.group(2)),
-                "applied": int(daily_match.group(3)),
-                "responses": int(daily_match.group(4)),
-                "interviews": int(daily_match.group(5)),
-            })
-
-        # Parse application entries
-        entry_match = re.match(r"^###\s+(.+?)\s*—\s*(.+)$", line.strip())
+        stripped = line.strip()
+        if "<!--" in stripped:
+            in_comment = True
+        if "-->" in stripped:
+            in_comment = False
+            continue
+        if in_comment:
+            continue
+        entry_match = re.match(r"^###\s+(.+?)\s*—\s*(.+)$", stripped)
         if entry_match:
             if current_entry:
                 entries.append(current_entry)
@@ -140,7 +128,6 @@ def parse_tracker(content: str) -> dict:
                 "company": entry_match.group(1).strip(),
                 "title": entry_match.group(2).strip(),
                 "stage": "", "date_applied": "", "link": "",
-                "h1b": "", "notes": "",
             }
             continue
 
@@ -151,100 +138,157 @@ def parse_tracker(content: str) -> dict:
                 current_entry["date_applied"] = line.split("**Date Applied:**")[1].strip()
             elif line.strip().startswith("- **Link:**"):
                 current_entry["link"] = line.split("**Link:**")[1].strip()
-            elif line.strip().startswith("- **H-1B Status:**"):
-                current_entry["h1b"] = line.split("**H-1B Status:**")[1].strip()
-            elif line.strip().startswith("- **Notes:**"):
-                current_entry["notes"] = line.split("**Notes:**")[1].strip()[:200]
 
     if current_entry:
         entries.append(current_entry)
 
-    # Compute pipeline from ACTUAL entries (not the manually maintained table)
-    stage_order = [
-        "Discovered", "Applied", "Confirmed", "Response",
-        "Phone Screen", "Technical Interview", "Onsite/Final",
-        "Offer", "Rejected"
-    ]
+    stage_order = ["Applied", "Phone Screen", "Technical Interview",
+                   "Take Home", "Onsite/Final", "Offer", "Rejected"]
+    # Normalize legacy stages
+    stage_normalize = {"Confirmed": "Applied", "Discovered": "Applied",
+                       "Response": "Applied", "Technical": "Technical Interview",
+                       "Onsite": "Onsite/Final"}
     pipeline = {s: 0 for s in stage_order}
     for e in entries:
         stage = e.get("stage", "").strip()
+        # Clean up variants like "Applied (pending verification)"
+        if "(" in stage:
+            stage = stage.split("(")[0].strip()
+        stage = stage_normalize.get(stage, stage)
+        e["stage"] = stage  # Update entry in-place for downstream use
         if stage in pipeline:
             pipeline[stage] += 1
         elif stage:
-            # Handle variations
-            stage_lower = stage.lower()
             for s in stage_order:
-                if s.lower() in stage_lower:
+                if s.lower() in stage.lower():
                     pipeline[s] += 1
                     break
 
-    return {"pipeline": pipeline, "daily_stats": daily_stats, "entries": entries}
+    return {"pipeline": pipeline, "entries": entries}
 
 
-def get_dedup_urls(tracker_entries: list, queue_data: dict) -> list:
-    """Build complete dedup list from tracker + queue completed/skipped + manual."""
-    urls = set()
-    entries = []
+STAGE_NORMALIZE = {"Confirmed": "Applied", "Discovered": "Applied",
+                   "Response": "Applied", "Technical": "Technical Interview",
+                   "Onsite": "Onsite/Final"}
 
-    for e in tracker_entries:
-        url = e.get("link", "")
+
+def normalize_stage(stage: str) -> str:
+    """Normalize legacy stage names to current ones."""
+    stage = stage.strip()
+    if "(" in stage:
+        stage = stage.split("(")[0].strip()
+    return STAGE_NORMALIZE.get(stage, stage)
+
+
+def get_applied_jobs() -> list:
+    """Get all applied jobs by merging dedup-index.md with tracker stages."""
+    # Build stage/date lookup from tracker
+    tracker_content = TRACKER_FILE.read_text() if TRACKER_FILE.exists() else ""
+    tracker_data = parse_tracker(tracker_content)
+    stage_by_url = {}
+    date_by_url = {}
+    for e in tracker_data["entries"]:
+        url = e.get("link", "").strip()
         if url:
-            urls.add(url)
+            url_base = url.replace("/application", "")
+            stage_by_url[url] = normalize_stage(e.get("stage", "Applied"))
+            stage_by_url[url_base] = normalize_stage(e.get("stage", "Applied"))
+            date_by_url[url] = e.get("date_applied", "")
+            date_by_url[url_base] = e.get("date_applied", "")
+
+    # Parse dedup for all APPLIED entries
+    entries = []
+    seen_urls = set()
+    if DEDUP_FILE.exists():
+        for line in DEDUP_FILE.read_text().split("\n"):
+            if "| APPLIED" not in line:
+                continue
+            parts = line.split(" | ")
+            if len(parts) < 4:
+                continue
+            url = parts[0].strip()
+            url_base = url.replace("/application", "")
+            if url_base in seen_urls:
+                continue
+            seen_urls.add(url_base)
+            company = parts[1].strip() if len(parts) > 1 else ""
+            title = parts[2].strip() if len(parts) > 2 else ""
+            date = (parts[4].strip() if len(parts) > 4 else "") or \
+                   date_by_url.get(url, date_by_url.get(url_base, ""))
+            stage = stage_by_url.get(url, stage_by_url.get(url_base, "Applied"))
             entries.append({
-                "url": url, "company": e["company"],
-                "title": e["title"], "source": "tracker",
-                "stage": e.get("stage", ""),
+                "url": url, "company": company, "title": title,
+                "date": date, "stage": stage,
             })
 
-    for section_name in ["completed", "skipped"]:
-        for job in queue_data["sections"].get(section_name, []):
-            url = job.get("url", "")
-            if url and url not in urls:
-                urls.add(url)
-                entries.append({
-                    "url": url, "company": job["company"],
-                    "title": job["title"], "source": f"queue-{section_name}",
-                    "stage": section_name,
-                })
+    # Also include tracker entries not in dedup
+    for e in tracker_data["entries"]:
+        url = e.get("link", "").strip()
+        url_base = url.replace("/application", "") if url else ""
+        if url and url_base not in seen_urls:
+            seen_urls.add(url_base)
+            entries.append({
+                "url": url, "company": e["company"], "title": e["title"],
+                "date": e.get("date_applied", ""), "stage": normalize_stage(e.get("stage", "Applied")),
+            })
 
-    if MANUAL_DEDUP_FILE.exists():
-        for line in MANUAL_DEDUP_FILE.read_text().split("\n"):
-            line = line.strip()
-            if line.startswith("- "):
-                parts = line[2:].split(" | ", 2)
-                url = parts[0].strip()
-                if url and url not in urls:
-                    urls.add(url)
-                    entries.append({
-                        "url": url,
-                        "company": parts[1].strip() if len(parts) > 1 else "Manual",
-                        "title": parts[2].strip() if len(parts) > 2 else "",
-                        "source": "manual", "stage": "manual",
-                    })
+    entries.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return entries
 
+
+def parse_manual_apply() -> list:
+    """Parse manual-apply-priority.md into entries for Manual Apply tab."""
+    if not MANUAL_APPLY_FILE.exists():
+        return []
+    content = MANUAL_APPLY_FILE.read_text()
+    entries = []
+    current_tier = ""
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("## TIER"):
+            current_tier = stripped.split("—")[0].replace("## ", "").strip() if "—" in stripped else stripped.replace("## ", "").strip()
+            continue
+        if stripped.startswith("## SKIP") or stripped.startswith("## Strategy"):
+            current_tier = ""
+            continue
+        if not current_tier or not stripped.startswith("- ["):
+            continue
+        checked = "[x]" in stripped
+        if checked:
+            continue  # Already applied, skip from manual list
+        rest = stripped.split("] ", 1)[1] if "] " in stripped else ""
+        company_match = re.match(r"\*\*(.+?)\*\*", rest)
+        if not company_match:
+            continue
+        company = company_match.group(1)
+        after_company = rest[company_match.end():].strip()
+        parts = after_company.split(" — ", 1) if " — " in after_company else [after_company, ""]
+        description = parts[0].strip().lstrip("— ") if parts[0] else ""
+        url = parts[1].strip() if len(parts) > 1 else ""
+        entries.append({
+            "score": 0, "company": company,
+            "title": description or "See careers page",
+            "url": url, "location": current_tier,
+            "h1b": "", "no_auto": True,
+        })
     return entries
 
 
 def get_agent_status() -> list:
-    """Get agent status directly from jobs.json (no CLI timeout issues)."""
+    """Get agent status from jobs.json."""
     try:
         with open(JOBS_JSON, 'r') as f:
             data = json.load(f)
-
         agents = []
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
         for job in data.get("jobs", []):
+            if not job.get("enabled", True):
+                continue
             state = job.get("state", {})
-            last_run_ms = state.get("lastRunAtMs", 0)
             running_ms = state.get("runningAtMs", 0)
-            next_run_ms = state.get("nextRunAtMs", 0)
             last_status = state.get("lastStatus", "")
-            last_duration_ms = state.get("lastDurationMs", 0)
-            consecutive_errors = state.get("consecutiveErrors", 0)
-
-            # Determine status
-            if running_ms and (now_ms - running_ms) < 1800000:  # 30 min
+            errors = state.get("consecutiveErrors", 0)
+            if running_ms and (now_ms - running_ms) < 1800000:
                 status = "running"
             elif last_status == "error":
                 status = "error"
@@ -252,175 +296,323 @@ def get_agent_status() -> list:
                 status = "ok"
             else:
                 status = "idle"
-
-            # Format times
-            def format_ago(ms):
-                if not ms:
-                    return "-"
-                diff_s = (now_ms - ms) / 1000
-                if diff_s < 60:
-                    return "<1m ago"
-                elif diff_s < 3600:
-                    return f"{int(diff_s/60)}m ago"
-                elif diff_s < 86400:
-                    return f"{diff_s/3600:.1f}h ago"
-                else:
-                    return f"{int(diff_s/86400)}d ago"
-
-            def format_until(ms):
-                if not ms:
-                    return "-"
-                diff_s = (ms - now_ms) / 1000
-                if diff_s < 0:
-                    return "overdue"
-                elif diff_s < 60:
-                    return "in <1m"
-                elif diff_s < 3600:
-                    return f"in {int(diff_s/60)}m"
-                else:
-                    return f"in {diff_s/3600:.1f}h"
-
-            agents.append({
-                "id": job["id"][:8],
-                "name": job.get("name", "Unknown"),
-                "status": status,
-                "enabled": job.get("enabled", True),
-                "last_run": format_ago(last_run_ms),
-                "next_run": format_until(next_run_ms),
-                "last_duration": f"{last_duration_ms/1000:.0f}s" if last_duration_ms else "-",
-                "consecutive_errors": consecutive_errors,
-                "schedule": job.get("schedule", {}).get("expr", ""),
-            })
-
+            agents.append({"name": job.get("name", "Unknown"), "status": status, "errors": errors})
         return agents
-    except Exception as e:
-        return [{"id": "", "name": "Error loading jobs.json", "status": str(e),
-                 "last_run": "-", "next_run": "-", "last_duration": "-",
-                 "consecutive_errors": 0, "schedule": "", "enabled": False}]
+    except Exception:
+        return []
 
 
-def add_manual_dedup(url: str, company: str = "", title: str = "") -> bool:
-    """Add a URL to the manual dedup file and also add to job-tracker.md."""
+def count_dedup_applied() -> int:
+    """Count APPLIED entries in dedup-index.md."""
+    if not DEDUP_FILE.exists():
+        return 0
+    return DEDUP_FILE.read_text().count("| APPLIED")
+
+
+def mark_as_applied(url: str, company: str = "", title: str = "") -> dict:
+    """Mark a job as applied: update queue, dedup, and tracker."""
     url = url.strip()
     if not url:
-        return False
+        return {"ok": False, "error": "URL is required"}
 
-    if not MANUAL_DEDUP_FILE.exists():
-        MANUAL_DEDUP_FILE.write_text("# Manual Dedup List\n# URLs added manually to prevent duplicate applications\n\n")
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    content = MANUAL_DEDUP_FILE.read_text()
-    if url in content:
-        return False
-
-    with open(MANUAL_DEDUP_FILE, "a") as f:
-        f.write(f"- {url} | {company or 'Manual'} | {title or 'Manual entry'}\n")
-
-    tracker_content = TRACKER_FILE.read_text()
-    if url not in tracker_content:
-        entry = f"""
-### {company or 'Manual'} — {title or 'Manual Entry'}
-- **Stage:** Applied
-- **Date Applied:** {datetime.now().strftime('%Y-%m-%d')}
-- **Source:** Manual (Howard applied directly)
-- **Link:** {url}
-- **Notes:** Manually added to tracker to prevent duplicate application by agent.
-- **Follow-up Due:** {datetime.now().strftime('%Y-%m-%d')}
-"""
-        if "## Priority Follow-ups" in tracker_content:
-            tracker_content = tracker_content.replace(
-                "## Priority Follow-ups", entry + "\n## Priority Follow-ups"
-            )
+    # 1. Update dedup-index.md
+    if DEDUP_FILE.exists():
+        dedup_content = DEDUP_FILE.read_text()
+        url_base = url.replace("/application", "")
+        if url not in dedup_content and url_base not in dedup_content:
+            with open(DEDUP_FILE, "a") as f:
+                f.write(f"{url} | {company or 'Manual'} | {title or 'Manual entry'} | APPLIED | {today}\n")
         else:
-            tracker_content += entry
-        TRACKER_FILE.write_text(tracker_content)
+            lines = dedup_content.split("\n")
+            updated = False
+            for i, line in enumerate(lines):
+                if (url in line or url_base in line) and "PENDING" in line:
+                    parts = line.split(" | ")
+                    if len(parts) >= 4:
+                        parts[3] = "APPLIED"
+                    if len(parts) >= 5:
+                        parts[4] = f" {today}"
+                    else:
+                        parts.append(f" {today}")
+                    lines[i] = " | ".join(parts)
+                    updated = True
+            if updated:
+                DEDUP_FILE.write_text("\n".join(lines))
+    else:
+        DEDUP_FILE.write_text(f"# Dedup Index\n{url} | {company or 'Manual'} | {title or 'Manual entry'} | APPLIED | {today}\n")
 
-    return True
+    # 2. Remove from pending in job-queue.md
+    if QUEUE_FILE.exists():
+        content = QUEUE_FILE.read_text()
+        lines = content.split("\n")
+        url_variants = [url, url + "/application", url.replace("/application", "")]
+        i = 0
+        removed = False
+        while i < len(lines):
+            if lines[i].startswith("### "):
+                block_start = i
+                block_end = i + 1
+                while block_end < len(lines) and not lines[block_end].startswith("### ") and not lines[block_end].startswith("## "):
+                    block_end += 1
+                block = "\n".join(lines[block_start:block_end])
+                if any(v in block for v in url_variants):
+                    del lines[block_start:block_end]
+                    removed = True
+                    continue
+                i = block_end
+            else:
+                i += 1
+        if removed:
+            QUEUE_FILE.write_text("\n".join(lines))
+
+    # 3. Add to job-tracker.md
+    if TRACKER_FILE.exists():
+        tracker_content = TRACKER_FILE.read_text()
+        url_base = url.replace("/application", "")
+        if url not in tracker_content and url_base not in tracker_content:
+            entry = f"\n### {company or 'Manual'} — {title or 'Manual Entry'}\n"
+            entry += f"- **Stage:** Applied\n"
+            entry += f"- **Date Applied:** {today}\n"
+            entry += f"- **Source:** Manual (Howard applied directly)\n"
+            entry += f"- **Link:** {url}\n"
+            entry += f"- **Notes:** Manually marked as applied via dashboard\n"
+            if "## Priority Follow-ups" in tracker_content:
+                tracker_content = tracker_content.replace(
+                    "## Priority Follow-ups", entry + "\n## Priority Follow-ups"
+                )
+            else:
+                tracker_content += entry
+            TRACKER_FILE.write_text(tracker_content)
+
+    return {"ok": True, "message": f"Marked {company or 'job'} — {title or 'unknown'} as applied"}
 
 
-def update_stage(search_term: str, new_stage: str, notes: str = "") -> dict:
-    """Update a job's stage in the tracker. Returns {ok, message}."""
-    valid_stages = [
-        "Discovered", "Applied", "Confirmed", "Response",
-        "Phone Screen", "Technical Interview", "Onsite/Final",
-        "Offer", "Rejected"
-    ]
+def update_stage(search_term: str, new_stage: str) -> dict:
+    """Update a job's stage in the tracker. Searches by company name or URL."""
+    valid_stages = ["Applied", "Phone Screen", "Technical Interview",
+                    "Take Home", "Onsite/Final", "Offer", "Rejected"]
     if new_stage not in valid_stages:
         return {"ok": False, "error": f"Invalid stage. Valid: {', '.join(valid_stages)}"}
+
+    if not TRACKER_FILE.exists():
+        return {"ok": False, "error": "Tracker file not found"}
 
     content = TRACKER_FILE.read_text()
     lines = content.split('\n')
     search_lower = search_term.lower().strip()
-    found = False
-    old_stage = ''
-    company = ''
-    title = ''
-    in_target = False
 
+    # Parse entries with line positions
+    entries = []
+    current = None
     for i, line in enumerate(lines):
         entry_match = re.match(r'^###\s+(.+?)\s*—\s*(.+)$', line.strip())
         if entry_match:
-            in_target = False
-            c = entry_match.group(1).strip()
-            t = entry_match.group(2).strip()
-            if search_lower in line.lower() or search_lower in c.lower():
-                in_target = True
-                company = c
-                title = t
-                found = True
+            if current:
+                entries.append(current)
+            current = {
+                "company": entry_match.group(1).strip(),
+                "title": entry_match.group(2).strip(),
+                "link": "", "stage_line": None,
+            }
             continue
-
-        if in_target:
+        if current:
             if line.strip().startswith('- **Stage:**'):
-                old_stage = line.split('**Stage:**')[1].strip()
-                lines[i] = f'- **Stage:** {new_stage}'
-                in_target = False
+                current["stage_line"] = i
+            elif line.strip().startswith('- **Link:**'):
+                current["link"] = line.split('**Link:**')[1].strip()
+    if current:
+        entries.append(current)
 
-    if not found:
+    # Find match by company, title, or URL
+    match = None
+    for e in entries:
+        searchable = f"{e['company']} {e['title']} {e['link']}".lower()
+        if search_lower in searchable:
+            match = e
+            break
+
+    if not match or match["stage_line"] is None:
         return {"ok": False, "error": f"No entry matching '{search_term}'"}
 
-    # Recompute pipeline counts in the table
-    stage_counts = {s: 0 for s in valid_stages}
-    for line in lines:
-        if line.strip().startswith('- **Stage:**'):
-            sv = line.split('**Stage:**')[1].strip()
-            if sv in stage_counts:
-                stage_counts[sv] += 1
+    old_stage = lines[match["stage_line"]].split('**Stage:**')[1].strip()
+    lines[match["stage_line"]] = f'- **Stage:** {new_stage}'
+    TRACKER_FILE.write_text('\n'.join(lines))
+    return {"ok": True, "message": f"{match['company']} — {match['title']}: {old_stage} -> {new_stage}"}
 
-    content_new = '\n'.join(lines)
-    for stage_name, count in stage_counts.items():
-        content_new = re.sub(
-            rf'\|\s*{re.escape(stage_name)}\s*\|\s*\d+\s*\|',
-            f'| {stage_name} | {count} |',
-            content_new
+
+SCRIPTS_DIR = WORKSPACE / "scripts"
+
+
+def extract_from_url(url: str) -> dict:
+    """Extract company and ATS type from a job URL."""
+    info = {"company": "", "title": "", "ats": ""}
+    url_lower = url.lower()
+    # Ashby
+    m = re.search(r"jobs\.ashbyhq\.com/([^/]+)", url_lower)
+    if m:
+        info["company"] = m.group(1).replace("-", " ").title()
+        info["ats"] = "ashby"
+        return info
+    # Greenhouse
+    m = re.search(r"boards\.greenhouse\.io/([^/]+)", url_lower)
+    if not m:
+        m = re.search(r"job-boards\.greenhouse\.io/([^/]+)", url_lower)
+    if m:
+        info["company"] = m.group(1).replace("-", " ").title()
+        info["ats"] = "greenhouse"
+        return info
+    # Lever
+    m = re.search(r"jobs\.lever\.co/([^/]+)", url_lower)
+    if m:
+        info["company"] = m.group(1).replace("-", " ").title()
+        info["ats"] = "lever"
+        return info
+    # Generic: use domain
+    m = re.search(r"https?://(?:www\.)?([^/]+)", url_lower)
+    if m:
+        info["company"] = m.group(1).split(".")[0].replace("-", " ").title()
+    return info
+
+
+def add_job(url: str, destination: str = "queue") -> dict:
+    """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
+    import subprocess
+    url = url.strip().rstrip("/")
+    if not url.startswith("http"):
+        return {"ok": False, "error": "URL must start with http"}
+
+    info = extract_from_url(url)
+    company = info["company"]
+
+    # Check dedup first
+    if DEDUP_FILE.exists():
+        dedup_content = DEDUP_FILE.read_text()
+        url_base = url.replace("/application", "")
+        if url in dedup_content or url_base in dedup_content:
+            return {"ok": False, "error": f"Already in system (dedup hit)"}
+
+    if destination == "applied":
+        return mark_as_applied(url, company, "Manual entry")
+
+    # Run preflight check
+    preflight = SCRIPTS_DIR / "preflight-check.py"
+    try:
+        result = subprocess.run(
+            ["python3", str(preflight), url],
+            capture_output=True, text=True, timeout=15
         )
+        output = result.stdout.strip()
+        if output.startswith("DEAD"):
+            return {"ok": False, "error": f"Job posting is dead: {output}"}
+    except Exception:
+        pass  # Preflight failure is non-blocking
 
-    TRACKER_FILE.write_text(content_new)
-    return {"ok": True, "message": f"{company} — {title}: {old_stage} -> {new_stage}"}
+    # Add to queue via add-to-queue.py
+    add_script = SCRIPTS_DIR / "add-to-queue.py"
+    job_json = json.dumps({
+        "score": 0,
+        "company": company,
+        "title": "Manually added — needs review",
+        "url": url,
+        "location": "Unknown",
+        "source": "Dashboard manual add",
+        "autoApply": True,
+    })
+    try:
+        result = subprocess.run(
+            ["python3", str(add_script), job_json],
+            capture_output=True, text=True, timeout=10
+        )
+        output = result.stdout.strip()
+        if "DUPLICATE" in output:
+            return {"ok": False, "error": "Already in queue (duplicate)"}
+        if "ADDED" in output:
+            return {"ok": True, "message": output}
+        return {"ok": False, "error": output or "Unknown error"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_skip_list() -> list:
+    """Get the skip companies list."""
+    try:
+        with open(SKIP_LIST_FILE, 'r') as f:
+            data = json.load(f)
+        return data.get("companies", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def add_to_skip_list(name: str, reason: str, category: str = "manual") -> dict:
+    """Add a company to the skip list."""
+    name = name.strip()
+    if not name:
+        return {"ok": False, "error": "Company name required"}
+    try:
+        with open(SKIP_LIST_FILE, 'r') as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {"companies": []}
+    # Check duplicate
+    for c in data["companies"]:
+        if c["name"].lower() == name.lower():
+            return {"ok": False, "error": f"{name} already in skip list"}
+    data["companies"].append({"name": name, "reason": reason or "Manually added", "category": category})
+    with open(SKIP_LIST_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+    return {"ok": True, "message": f"Added {name} to skip list"}
+
+
+def remove_from_skip_list(name: str) -> dict:
+    """Remove a company from the skip list."""
+    try:
+        with open(SKIP_LIST_FILE, 'r') as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"ok": False, "error": "Skip list not found"}
+    original = len(data.get("companies", []))
+    data["companies"] = [c for c in data.get("companies", []) if c["name"].lower() != name.lower()]
+    if len(data["companies"]) == original:
+        return {"ok": False, "error": f"{name} not found in skip list"}
+    with open(SKIP_LIST_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+    return {"ok": True, "message": f"Removed {name} from skip list"}
 
 
 def build_api_response() -> dict:
     """Build full dashboard data."""
     queue_content = QUEUE_FILE.read_text() if QUEUE_FILE.exists() else ""
-    tracker_content = TRACKER_FILE.read_text() if TRACKER_FILE.exists() else ""
+    queue_sections = parse_queue(queue_content)
 
-    queue_data = parse_queue(queue_content)
-    tracker_data = parse_tracker(tracker_content)
-    dedup_list = get_dedup_urls(tracker_data["entries"], queue_data)
+    # Merge manual-apply-priority.md entries
+    manual_entries = parse_manual_apply()
+    queue_sections["manual_apply"].extend(manual_entries)
+
+    applied_jobs = get_applied_jobs()
     agents = get_agent_status()
+    dedup_applied = count_dedup_applied()
+
+    # Pipeline from tracker
+    tracker_content = TRACKER_FILE.read_text() if TRACKER_FILE.exists() else ""
+    tracker_data = parse_tracker(tracker_content)
 
     now = datetime.now()
-    h1b_days = (H1B_DEADLINE - now).days
-    opt_days = (OPT_EXPIRY - now).days
+    offer_days = (OFFER_DEADLINE - now).days
+    h1b_days = (H1B_REG_DEADLINE - now).days
 
     return {
         "timestamp": now.isoformat(),
+        "offer_days": offer_days,
         "h1b_days": h1b_days,
-        "opt_days": opt_days,
         "agents": agents,
-        "queue": queue_data,
-        "tracker": tracker_data,
-        "dedup": dedup_list,
-        "dedup_count": len(dedup_list),
+        "pending": queue_sections["pending"],
+        "manual_apply": queue_sections["manual_apply"],
+        "applied": applied_jobs,
+        "applied_count": dedup_applied,
+        "pipeline": tracker_data["pipeline"],
+        "skip_list": get_skip_list(),
     }
 
 
@@ -429,389 +621,421 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Search Command Center</title>
+<title>Job Search Dashboard</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
-  h1 { color: #58a6ff; margin-bottom: 4px; font-size: 24px; }
-  h2 { color: #8b949e; font-size: 14px; margin-bottom: 20px; font-weight: normal; }
-  h3 { color: #58a6ff; font-size: 16px; margin: 16px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #21262d; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
-  .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-  .stat { background: #21262d; border-radius: 6px; padding: 12px 16px; flex: 1; min-width: 100px; text-align: center; }
-  .stat .value { font-size: 28px; font-weight: bold; color: #58a6ff; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .header h1 { color: #58a6ff; font-size: 22px; }
+  .header .sub { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  .header .controls { text-align: right; }
+  .header .timer { font-size: 12px; color: #8b949e; }
+  .header button { padding: 4px 12px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; cursor: pointer; font-size: 12px; }
+  .countdown { background: linear-gradient(135deg, #f8514922, #d2992222); border: 1px solid #f8514944; border-radius: 8px; padding: 14px 20px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .countdown .days { font-size: 36px; font-weight: bold; color: #f85149; }
+  .countdown .label { font-size: 12px; color: #8b949e; }
+  .countdown .detail { font-size: 13px; color: #c9d1d9; }
+  .stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 90px; text-align: center; }
+  .stat .value { font-size: 28px; font-weight: bold; }
   .stat .label { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-top: 2px; }
-  .stat.green .value { color: #3fb950; }
-  .stat.yellow .value { color: #d29922; }
-  .stat.red .value { color: #f85149; }
-  .stat.purple .value { color: #bc8cff; }
-  .stat.orange .value { color: #db6d28; }
-  .agent { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 6px; margin-bottom: 6px; background: #21262d; }
-  .agent .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .dot.running { background: #3fb950; animation: pulse 1.5s infinite; }
-  .dot.ok { background: #3fb950; }
+  .v-yellow { color: #d29922; }
+  .v-green { color: #3fb950; }
+  .v-blue { color: #58a6ff; }
+  .v-purple { color: #bc8cff; }
+  .v-red { color: #f85149; }
+  .agents-bar { display: flex; gap: 16px; margin-bottom: 16px; padding: 8px 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; font-size: 13px; align-items: center; }
+  .agents-bar .lbl { color: #8b949e; font-size: 11px; text-transform: uppercase; margin-right: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.ok, .dot.running { background: #3fb950; }
+  .dot.running { animation: pulse 1.5s infinite; }
   .dot.error { background: #f85149; }
   .dot.idle { background: #8b949e; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .agent .name { font-weight: 600; flex: 1; }
-  .agent .meta { font-size: 12px; color: #8b949e; }
-  .agent .errors { color: #f85149; font-size: 11px; font-weight: 600; }
+  .add-bar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
+  .add-bar input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-size: 14px; }
+  .add-bar input:focus { outline: none; border-color: #58a6ff; }
+  .btn-add-queue { padding: 8px 16px; background: #1f6feb; border: 1px solid #1f6feb; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .btn-add-queue:hover { background: #388bfd; }
+  .btn-add-applied { padding: 8px 16px; background: #238636; border: 1px solid #238636; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .btn-add-applied:hover { background: #2ea043; }
+  .tabs { display: flex; gap: 2px; }
+  .tab { padding: 8px 16px; background: #21262d; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px; color: #8b949e; border: 1px solid transparent; border-bottom: none; }
+  .tab.active { background: #161b22; color: #c9d1d9; border-color: #30363d; }
+  .panel { display: none; background: #161b22; border: 1px solid #30363d; border-radius: 0 8px 8px 8px; padding: 16px; margin-bottom: 16px; max-height: calc(100vh - 340px); overflow-y: auto; }
+  .panel.active { display: block; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; padding: 8px; color: #8b949e; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #30363d; }
   td { padding: 8px; border-bottom: 1px solid #21262d; }
   tr:hover { background: #1c2128; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge.pending { background: #1f6feb33; color: #58a6ff; }
-  .badge.applied { background: #23883333; color: #3fb950; }
-  .badge.skipped, .badge.rejected { background: #f8514933; color: #f85149; }
-  .badge.confirmed, .badge.response { background: #d2992233; color: #d29922; }
-  .badge.in-progress { background: #bc8cff33; color: #bc8cff; }
-  .badge.phone-screen { background: #db6d2833; color: #db6d28; }
-  .badge.technical-interview, .badge.onsite\/final { background: #a371f733; color: #a371f7; }
-  .badge.offer { background: #3fb95033; color: #3fb950; font-size: 13px; }
-  .badge.manual { background: #8b949e33; color: #8b949e; }
   .score { font-weight: bold; color: #d29922; }
   a { color: #58a6ff; text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .url-cell { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .form-row { display: flex; gap: 8px; margin-top: 12px; }
-  .form-row input, .form-row select { flex: 1; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; }
-  .form-row input:focus, .form-row select:focus { outline: none; border-color: #58a6ff; }
-  .form-row button { padding: 8px 20px; background: #238636; border: none; border-radius: 6px; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; white-space: nowrap; }
-  .form-row button:hover { background: #2ea043; }
-  .refresh-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-  .refresh-bar .timer { font-size: 12px; color: #8b949e; }
-  .refresh-bar button { padding: 4px 12px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; cursor: pointer; font-size: 12px; }
+  .url-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn-mark { padding: 4px 10px; background: #238636; border: 1px solid #238636; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .btn-mark:hover { background: #2ea043; }
+  .btn-update { padding: 3px 8px; background: #1f6feb; border: 1px solid #1f6feb; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
+  .btn-update:hover { background: #388bfd; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .b-applied { background: #58a6ff22; color: #58a6ff; }
+  .b-phone { background: #db6d2822; color: #db6d28; }
+  .b-interview { background: #a371f722; color: #a371f7; }
+  .b-takehome { background: #d2992222; color: #d29922; }
+  .b-offer { background: #3fb95044; color: #3fb950; font-weight: bold; }
+  .b-rejected { background: #f8514922; color: #f85149; }
+  .b-csp { background: #f8514922; color: #f85149; }
+  .b-limit { background: #d2992222; color: #d29922; }
+  .b-technical { background: #a371f722; color: #a371f7; }
+  .b-captcha { background: #db6d2822; color: #db6d28; }
+  .b-manual { background: #8b949e22; color: #8b949e; }
+  .btn-remove { padding: 3px 8px; background: #da3633; border: 1px solid #da3633; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
+  .btn-remove:hover { background: #f85149; }
+  .skip-add-bar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .skip-add-bar input, .skip-add-bar select { padding: 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; }
+  .skip-add-bar input { flex: 1; }
+  .skip-add-bar input:focus { outline: none; border-color: #58a6ff; }
+  .btn-add-skip { padding: 8px 14px; background: #da3633; border: 1px solid #da3633; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .btn-add-skip:hover { background: #f85149; }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .filter-bar input { flex: 1; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; }
+  .filter-bar input:focus { outline: none; border-color: #58a6ff; }
+  .filter-bar select { padding: 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; }
+  .filter-bar .count { font-size: 12px; color: #8b949e; white-space: nowrap; }
+  .stage-sel { padding: 2px 4px; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; font-size: 11px; }
+  .empty { padding: 20px; text-align: center; color: #8b949e; }
   .toast { position: fixed; bottom: 20px; right: 20px; background: #238636; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; display: none; z-index: 100; }
   .toast.error { background: #f85149; }
-  .countdown-banner { background: linear-gradient(135deg, #f8514922, #d2992222); border: 1px solid #f8514944; border-radius: 8px; padding: 12px 20px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
-  .countdown-banner .days { font-size: 32px; font-weight: bold; color: #f85149; }
-  .countdown-banner .label { font-size: 12px; color: #8b949e; }
-  .pipeline-bar { display: flex; gap: 2px; margin-top: 8px; height: 6px; border-radius: 3px; overflow: hidden; }
-  .pipeline-bar .seg { height: 100%; min-width: 2px; }
-  .tabs { display: flex; gap: 2px; margin-bottom: 12px; }
-  .tab { padding: 6px 14px; background: #21262d; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 13px; color: #8b949e; }
-  .tab.active { background: #30363d; color: #c9d1d9; }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
-  .openai-warn { color: #d29922; font-size: 11px; }
-  .stage-btn { padding: 2px 6px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; cursor: pointer; font-size: 11px; }
-  .stage-btn:hover { background: #30363d; color: #c9d1d9; }
 </style>
 </head>
 <body>
 
-<div class="refresh-bar">
+<div class="header">
   <div>
-    <h1>Job Search Command Center</h1>
-    <h2 id="subtitle">Loading...</h2>
+    <h1>Job Search Dashboard</h1>
+    <div class="sub" id="subtitle">Loading...</div>
   </div>
-  <div style="text-align:right">
+  <div class="controls">
     <div class="timer" id="timer">Refreshing in 30s</div>
     <button onclick="refresh()">Refresh Now</button>
   </div>
 </div>
 
-<div class="countdown-banner" id="countdown-banner"></div>
-<div class="stat-row" id="stats-row"></div>
+<div class="countdown" id="countdown"></div>
+<div class="stats" id="stats"></div>
+<div class="agents-bar" id="agents"></div>
 
-<div class="grid">
-  <div class="card">
-    <h3>Agent Status</h3>
-    <div id="agents"></div>
-  </div>
-  <div class="card">
-    <h3>Pipeline (computed from entries)</h3>
-    <div id="pipeline"></div>
-    <div class="pipeline-bar" id="pipeline-bar"></div>
-  </div>
+<div class="add-bar">
+  <input type="text" id="add-url" placeholder="Paste job URL to add..." />
+  <button class="btn-add-queue" onclick="addJob('queue')">Add to Queue</button>
+  <button class="btn-add-applied" onclick="addJob('applied')">Mark Applied</button>
 </div>
 
-<div class="card" style="margin-bottom:16px">
-  <h3>Update Stage</h3>
-  <p style="font-size:12px;color:#8b949e;margin-bottom:8px">Update a job's stage (e.g. when you get a phone screen). Search by company name or URL.</p>
-  <div class="form-row">
-    <input type="text" id="stage-search" placeholder="Company name or URL substring..." />
-    <select id="stage-select">
-      <option value="Confirmed">Confirmed</option>
-      <option value="Response">Response</option>
-      <option value="Phone Screen">Phone Screen</option>
-      <option value="Technical Interview">Technical Interview</option>
-      <option value="Onsite/Final">Onsite/Final</option>
-      <option value="Offer">Offer</option>
-      <option value="Rejected">Rejected</option>
-    </select>
-    <button onclick="updateStage()">Update Stage</button>
-  </div>
-</div>
-
-<div class="card" style="margin-bottom:16px">
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('pending')">Pending Queue</div>
-    <div class="tab" onclick="switchTab('manual')">Manual Apply</div>
-    <div class="tab" onclick="switchTab('progress')">In Progress</div>
-    <div class="tab" onclick="switchTab('completed')">Completed</div>
-    <div class="tab" onclick="switchTab('skipped')">Skipped</div>
-  </div>
-  <div class="tab-content active" id="tab-pending"></div>
-  <div class="tab-content" id="tab-manual"></div>
-  <div class="tab-content" id="tab-progress"></div>
-  <div class="tab-content" id="tab-completed"></div>
-  <div class="tab-content" id="tab-skipped"></div>
-</div>
-
-<div class="card" style="margin-bottom:16px">
-  <h3>Dedup List (<span id="dedup-count">0</span> URLs)</h3>
-  <p style="font-size:12px;color:#8b949e;margin-bottom:8px">All applied/tracked URLs. Agents check this before applying.</p>
-  <div class="form-row">
-    <input type="url" id="dedup-url" placeholder="https://jobs.ashbyhq.com/company/..." />
-    <input type="text" id="dedup-company" placeholder="Company name" style="max-width:160px" />
-    <input type="text" id="dedup-title" placeholder="Job title" style="max-width:200px" />
-    <button onclick="addDedup()">Add to Dedup</button>
-  </div>
-  <div style="margin-top:12px;max-height:300px;overflow-y:auto" id="dedup-table"></div>
-</div>
-
-<div class="card">
-  <h3>Application Tracker</h3>
-  <div style="max-height:500px;overflow-y:auto" id="tracker-table"></div>
-</div>
+<div class="tabs" id="tabs"></div>
+<div class="panel active" id="p-pending"></div>
+<div class="panel" id="p-manual"></div>
+<div class="panel" id="p-applied"></div>
+<div class="panel" id="p-skip"></div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-let data = null;
-let countdown = 30;
+let D = null;
+let cd = 30;
+let activeTab = 'pending';
+let searchQ = '';
+let stageFilter = 'all';
 
 async function refresh() {
   try {
-    const resp = await fetch('/api/data');
-    data = await resp.json();
+    const r = await fetch('/api/data');
+    D = await r.json();
     render();
-    countdown = 30;
-  } catch(e) {
-    showToast('Failed to refresh: ' + e.message, true);
-  }
+    cd = 30;
+  } catch(e) { toast('Failed to refresh: ' + e.message, 1); }
 }
 
 function render() {
-  if (!data) return;
+  if (!D) return;
 
-  // Subtitle with dynamic H-1B countdown
   document.getElementById('subtitle').textContent =
-    `JobHunt Agent | Deadline: ${data.h1b_days}d | Auto-refresh 30s`;
+    'Howard Cheng | Auto-refresh 30s';
 
-  // Countdown banner
-  const urgency = data.h1b_days <= 14 ? 'CRITICAL' : data.h1b_days <= 21 ? 'URGENT' : 'IMPORTANT';
-  document.getElementById('countdown-banner').innerHTML = `
+  // Countdown
+  const urg = D.offer_days <= 7 ? 'CRITICAL' : D.offer_days <= 14 ? 'URGENT' : 'TIME-SENSITIVE';
+  document.getElementById('countdown').innerHTML = `
     <div>
-      <div class="label">${urgency} — H-1B Registration Deadline</div>
-      <div style="color:#c9d1d9;font-size:13px;margin-top:4px">Need employer to file by mid-March 2026</div>
+      <div class="label">${urg} — Need Offer for H-1B</div>
+      <div class="detail">Must have offer by Mar 6 to start H-1B process</div>
     </div>
     <div style="text-align:center">
-      <div class="days">${data.h1b_days}</div>
-      <div class="label">days left</div>
+      <div class="days">${D.offer_days}</div>
+      <div class="label">days to offer deadline</div>
     </div>
     <div style="text-align:right">
-      <div style="color:#d29922;font-size:16px;font-weight:600">OPT: ${data.opt_days}d</div>
-      <div class="label">until expiry</div>
-    </div>
-  `;
+      <div style="color:#d29922;font-size:20px;font-weight:600">${D.h1b_days}d</div>
+      <div class="label">H-1B reg deadline (Mar 19)</div>
+    </div>`;
 
-  // Stats row — computed from actual data
-  const q = data.queue.sections;
-  const pipe = data.tracker.pipeline;
-  const phoneScreens = pipe['Phone Screen'] || 0;
-  const interviews = (pipe['Technical Interview'] || 0) + (pipe['Onsite/Final'] || 0);
-  const offers = pipe['Offer'] || 0;
-  const totalApplied = (pipe['Applied'] || 0) + (pipe['Confirmed'] || 0) + (pipe['Response'] || 0)
-    + phoneScreens + interviews + offers;
-
-  document.getElementById('stats-row').innerHTML = `
-    <div class="stat yellow"><div class="value">${q.pending.length}</div><div class="label">Queue</div></div>
-    <div class="stat green"><div class="value">${totalApplied}</div><div class="label">Applied</div></div>
-    <div class="stat"><div class="value">${pipe['Confirmed'] || 0}</div><div class="label">Confirmed</div></div>
-    <div class="stat orange"><div class="value">${phoneScreens}</div><div class="label">Phone Screens</div></div>
-    <div class="stat purple"><div class="value">${interviews}</div><div class="label">Interviews</div></div>
-    <div class="stat ${offers > 0 ? 'green' : ''}"><div class="value">${offers}</div><div class="label">Offers</div></div>
-    <div class="stat red"><div class="value">${pipe['Rejected'] || 0}</div><div class="label">Rejected</div></div>
-    <div class="stat"><div class="value">${data.dedup_count}</div><div class="label">Total Tracked</div></div>
-  `;
+  // Stats
+  const p = D.pipeline;
+  const interviews = (p['Phone Screen']||0) + (p['Technical Interview']||0) + (p['Take Home']||0) + (p['Onsite/Final']||0);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="value v-yellow">${D.pending.length}</div><div class="label">Queue</div></div>
+    <div class="stat"><div class="value v-green">${D.applied_count}</div><div class="label">Applied</div></div>
+    <div class="stat"><div class="value v-purple">${interviews}</div><div class="label">Interviews</div></div>
+    <div class="stat"><div class="value ${(p['Offer']||0)>0?'v-green':''}">${p['Offer']||0}</div><div class="label">Offers</div></div>
+    <div class="stat"><div class="value v-red">${p['Rejected']||0}</div><div class="label">Rejected</div></div>`;
 
   // Agents
-  document.getElementById('agents').innerHTML = data.agents.map(a => `
-    <div class="agent">
-      <div class="dot ${a.status}"></div>
-      <div class="name">${esc(a.name)} ${!a.enabled ? '<span style="color:#f85149;font-size:11px">(DISABLED)</span>' : ''}</div>
-      <div class="meta">
-        ${a.status.toUpperCase()}
-        | Last: ${a.last_run} (${a.last_duration})
-        | Next: ${a.next_run}
-        | ${a.schedule}
-        ${a.consecutive_errors > 0 ? `<span class="errors"> | ${a.consecutive_errors} errors</span>` : ''}
-      </div>
-    </div>
-  `).join('');
+  document.getElementById('agents').innerHTML = '<span class="lbl">Agents:</span>' +
+    D.agents.map(a => `<span><span class="dot ${a.status}"></span>${h(a.name)}${a.errors>0?' <span style="color:#f85149">('+a.errors+' err)</span>':''}</span>`).join('');
 
-  // Pipeline with visual bar
-  const pipeColors = {
-    'Discovered': '#8b949e', 'Applied': '#58a6ff', 'Confirmed': '#3fb950',
-    'Response': '#d29922', 'Phone Screen': '#db6d28', 'Technical Interview': '#a371f7',
-    'Onsite/Final': '#bc8cff', 'Offer': '#3fb950', 'Rejected': '#f85149'
-  };
-  const pipeEntries = Object.entries(pipe).filter(([,v]) => v > 0);
-  const pipeTotal = Object.values(pipe).reduce((a,b) => a+b, 0) || 1;
+  // Tabs
+  document.getElementById('tabs').innerHTML = `
+    <div class="tab ${activeTab==='pending'?'active':''}" onclick="tab('pending')">Pending Queue (${D.pending.length})</div>
+    <div class="tab ${activeTab==='manual'?'active':''}" onclick="tab('manual')">Manual Apply (${D.manual_apply.length})</div>
+    <div class="tab ${activeTab==='applied'?'active':''}" onclick="tab('applied')">Applied (${D.applied_count})</div>
+    <div class="tab ${activeTab==='skip'?'active':''}" onclick="tab('skip')">Skip List (${D.skip_list.length})</div>`;
 
-  document.getElementById('pipeline').innerHTML = Object.entries(pipe).map(([k,v]) => `
-    <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d">
-      <span style="color:${pipeColors[k] || '#c9d1d9'}">${k}</span>
-      <span style="font-weight:bold;color:${v > 0 ? pipeColors[k] : '#8b949e'}">${v}</span>
-    </div>
-  `).join('');
+  renderPending();
+  renderManual();
+  renderApplied();
+  renderSkip();
+}
 
-  document.getElementById('pipeline-bar').innerHTML = pipeEntries.map(([k,v]) =>
-    `<div class="seg" style="width:${v/pipeTotal*100}%;background:${pipeColors[k]}" title="${k}: ${v}"></div>`
-  ).join('');
-
-  // Queue tabs
-  const manualJobs = q.manual_apply || [];
-  document.querySelector('[onclick="switchTab(\'pending\')"]').textContent = `Pending Queue (${q.pending.length})`;
-  document.querySelector('[onclick="switchTab(\'manual\')"]').textContent = `Manual Apply (${manualJobs.length})`;
-  renderJobTable('tab-pending', q.pending, true);
-  renderJobTable('tab-manual', manualJobs, true);
-  renderJobTable('tab-progress', q.in_progress, true);
-  renderJobTable('tab-completed', q.completed, false);
-  renderJobTable('tab-skipped', q.skipped, false);
-
-  // Dedup
-  document.getElementById('dedup-count').textContent = data.dedup_count;
-  document.getElementById('dedup-table').innerHTML = `<table>
-    <tr><th>Company</th><th>Title</th><th>Stage</th><th>Source</th><th>URL</th></tr>
-    ${data.dedup.slice(0, 100).map(d => `<tr>
-      <td>${esc(d.company)}</td>
-      <td>${esc(d.title)}</td>
-      <td><span class="badge ${(d.stage||'').toLowerCase().replace(/[\s/]/g,'-')}">${esc(d.stage)}</span></td>
-      <td>${esc(d.source)}</td>
-      <td class="url-cell"><a href="${esc(d.url)}" target="_blank">${esc(d.url.substring(0,50))}...</a></td>
-    </tr>`).join('')}
-  </table>`;
-
-  // Tracker with stage badges + dedup button
-  document.getElementById('tracker-table').innerHTML = `<table>
-    <tr><th>Company</th><th>Title</th><th>Stage</th><th>Applied</th><th>H-1B</th><th></th></tr>
-    ${data.tracker.entries.map(e => `<tr>
-      <td>${esc(e.company)}</td>
-      <td>${esc(e.title)}</td>
-      <td><span class="badge ${(e.stage||'').toLowerCase().replace(/[\s/]/g,'-')}">${esc(e.stage)}</span></td>
-      <td>${esc(e.date_applied)}</td>
-      <td>${esc(e.h1b)}</td>
-      <td><button class="stage-btn" onclick="addJobToDedup('${esc(e.link)}','${esc(e.company)}','${esc(e.title)}')">+ Dedup</button></td>
+function renderPending() {
+  const el = document.getElementById('p-pending');
+  const jobs = D.pending;
+  if (!jobs.length) { el.innerHTML = '<div class="empty">No pending jobs in queue</div>'; return; }
+  el.innerHTML = `<table>
+    <tr><th>Score</th><th>Company</th><th>Title</th><th>Location</th><th>H-1B</th><th>Link</th><th></th></tr>
+    ${jobs.map((j,i) => `<tr>
+      <td class="score">${j.score}</td>
+      <td>${h(j.company)}</td>
+      <td>${h(j.title)}</td>
+      <td>${h(j.location)}</td>
+      <td>${h(j.h1b).substring(0,20)}</td>
+      <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
+      <td><button class="btn-mark" data-i="${i}" data-t="pending" onclick="markBtn(this)">Mark Applied</button></td>
     </tr>`).join('')}
   </table>`;
 }
 
-function renderJobTable(id, jobs, showScore) {
-  document.getElementById(id).innerHTML = jobs.length === 0
-    ? '<p style="color:#8b949e;padding:12px">No jobs in this section</p>'
-    : `<table>
-    <tr>${showScore ? '<th>Score</th>' : ''}<th>Company</th><th>Title</th><th>Location</th><th>Salary</th><th>H-1B</th><th>Link</th><th></th></tr>
-    ${jobs.map(j => `<tr>
-      ${showScore ? `<td class="score">${j.score}</td>` : ''}
-      <td>${esc(j.company)}</td>
-      <td>${esc(j.title)}</td>
-      <td>${esc(j.location)}</td>
-      <td>${esc(j.salary)}</td>
-      <td>${esc(j.h1b).substring(0,20)}</td>
-      <td class="url-cell"><a href="${esc(j.url)}" target="_blank">Apply</a></td>
-      <td><button class="stage-btn" onclick="addJobToDedup('${esc(j.url)}','${esc(j.company)}','${esc(j.title)}')">+ Dedup</button></td>
+function renderManual() {
+  const el = document.getElementById('p-manual');
+  const jobs = D.manual_apply;
+  if (!jobs.length) { el.innerHTML = '<div class="empty">No manual apply jobs</div>'; return; }
+  el.innerHTML = `<table>
+    <tr><th>Score</th><th>Company</th><th>Title</th><th>Location</th><th>Link</th><th></th></tr>
+    ${jobs.map((j,i) => `<tr>
+      <td class="score">${j.score||'-'}</td>
+      <td>${h(j.company)}</td>
+      <td>${h(j.title)}</td>
+      <td>${h(j.location)}</td>
+      <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
+      <td><button class="btn-mark" data-i="${i}" data-t="manual" onclick="markBtn(this)">Mark Applied</button></td>
     </tr>`).join('')}
   </table>`;
 }
 
-function switchTab(name) {
+function renderApplied() {
+  const el = document.getElementById('p-applied');
+  let jobs = D.applied;
+
+  if (searchQ) {
+    const s = searchQ.toLowerCase();
+    jobs = jobs.filter(j => j.company.toLowerCase().includes(s) || j.title.toLowerCase().includes(s));
+  }
+  if (stageFilter !== 'all') {
+    jobs = jobs.filter(j => j.stage === stageFilter);
+  }
+
+  el.innerHTML = `
+    <div class="filter-bar">
+      <input type="text" placeholder="Search company or title..." value="${h(searchQ)}" oninput="searchQ=this.value;renderApplied()" />
+      <select onchange="stageFilter=this.value;renderApplied()">
+        <option value="all" ${stageFilter==='all'?'selected':''}>All Stages</option>
+        <option value="Applied" ${stageFilter==='Applied'?'selected':''}>Applied</option>
+        <option value="Phone Screen" ${stageFilter==='Phone Screen'?'selected':''}>Phone Screen</option>
+        <option value="Technical Interview" ${stageFilter==='Technical Interview'?'selected':''}>Technical Interview</option>
+        <option value="Take Home" ${stageFilter==='Take Home'?'selected':''}>Take Home</option>
+        <option value="Onsite/Final" ${stageFilter==='Onsite/Final'?'selected':''}>Onsite/Final</option>
+        <option value="Offer" ${stageFilter==='Offer'?'selected':''}>Offer</option>
+        <option value="Rejected" ${stageFilter==='Rejected'?'selected':''}>Rejected</option>
+      </select>
+      <span class="count">${jobs.length} jobs</span>
+    </div>
+    ${jobs.length === 0 ? '<div class="empty">No matching jobs</div>' : `<table>
+    <tr><th>Company</th><th>Title</th><th>Date</th><th>Stage</th><th>Link</th><th>Update Stage</th></tr>
+    ${jobs.map((j,i) => `<tr>
+      <td>${h(j.company)}</td>
+      <td>${h(j.title)}</td>
+      <td>${h(j.date)}</td>
+      <td><span class="badge ${bc(j.stage)}">${h(j.stage)}</span></td>
+      <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
+      <td style="white-space:nowrap">
+        <select class="stage-sel" id="ss-${i}">
+          ${['Applied','Phone Screen','Technical Interview','Take Home','Onsite/Final','Offer','Rejected'].map(s =>
+            '<option value="'+s+'" '+(j.stage===s?'selected':'')+'>'+s+'</option>'
+          ).join('')}
+        </select>
+        <button class="btn-update" data-i="${i}" onclick="updateBtn(this)">Update</button>
+      </td>
+    </tr>`).join('')}
+    </table>`}`;
+}
+
+function bc(stage) {
+  const m = {'Applied':'b-applied','Phone Screen':'b-phone','Technical Interview':'b-interview',
+    'Take Home':'b-takehome','Onsite/Final':'b-interview',
+    'Offer':'b-offer','Rejected':'b-rejected'};
+  return m[stage] || 'b-applied';
+}
+
+function tab(name) {
+  activeTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const map = {pending: 0, manual: 1, progress: 2, completed: 3, skipped: 4};
-  document.querySelectorAll('.tab')[map[name]].classList.add('active');
-  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.panel').forEach(t => t.classList.remove('active'));
+  const idx = {pending:0, manual:1, applied:2, skip:3}[name];
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+  document.getElementById('p-' + name).classList.add('active');
 }
 
-async function addDedup() {
-  const url = document.getElementById('dedup-url').value.trim();
-  const company = document.getElementById('dedup-company').value.trim();
-  const title = document.getElementById('dedup-title').value.trim();
-  if (!url) { showToast('URL is required', true); return; }
+async function markBtn(btn) {
+  const type = btn.dataset.t;
+  const idx = parseInt(btn.dataset.i);
+  const job = type === 'pending' ? D.pending[idx] : D.manual_apply[idx];
+  if (!job) return;
+  if (!confirm('Mark "' + job.company + ' \u2014 ' + job.title + '" as applied?')) return;
   try {
-    const resp = await fetch('/api/dedup', {
+    const r = await fetch('/api/mark-applied', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, company, title})
+      body: JSON.stringify({url: job.url, company: job.company, title: job.title})
     });
-    const result = await resp.json();
-    if (result.ok) {
-      showToast('Added to dedup list + tracker');
-      document.getElementById('dedup-url').value = '';
-      document.getElementById('dedup-company').value = '';
-      document.getElementById('dedup-title').value = '';
-      refresh();
-    } else {
-      showToast(result.error || 'Already exists', true);
-    }
-  } catch(e) { showToast('Error: ' + e.message, true); }
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error || 'Failed', 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
 }
 
-async function updateStage() {
-  const search = document.getElementById('stage-search').value.trim();
-  const stage = document.getElementById('stage-select').value;
-  if (!search) { showToast('Enter a company name or URL', true); return; }
+async function updateBtn(btn) {
+  const idx = parseInt(btn.dataset.i);
+  const sel = document.getElementById('ss-' + idx);
+  if (!sel) return;
+  // Get the filtered list to find the right job
+  let jobs = D.applied;
+  if (searchQ) {
+    const s = searchQ.toLowerCase();
+    jobs = jobs.filter(j => j.company.toLowerCase().includes(s) || j.title.toLowerCase().includes(s));
+  }
+  if (stageFilter !== 'all') {
+    jobs = jobs.filter(j => j.stage === stageFilter);
+  }
+  const job = jobs[idx];
+  if (!job) return;
+  // Use URL as search term for precision (unique per job)
+  const searchKey = job.url || job.company;
   try {
-    const resp = await fetch('/api/stage', {
+    const r = await fetch('/api/stage', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({search, stage})
+      body: JSON.stringify({search: searchKey, stage: sel.value})
     });
-    const result = await resp.json();
-    if (result.ok) {
-      showToast(result.message);
-      document.getElementById('stage-search').value = '';
-      refresh();
-    } else {
-      showToast(result.error, true);
-    }
-  } catch(e) { showToast('Error: ' + e.message, true); }
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error, 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
 }
 
-async function addJobToDedup(url, company, title) {
-  if (!url) { showToast('No URL for this job', true); return; }
+async function addJob(dest) {
+  const input = document.getElementById('add-url');
+  const url = input.value.trim();
+  if (!url) { toast('Paste a URL first', 1); return; }
+  if (!url.startsWith('http')) { toast('URL must start with http', 1); return; }
+  const action = dest === 'applied' ? 'Mark as applied' : 'Add to queue';
+  if (!confirm(action + '?\n' + url)) return;
   try {
-    const resp = await fetch('/api/dedup', {
+    const r = await fetch('/api/add-job', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, company, title})
+      body: JSON.stringify({url: url, destination: dest})
     });
-    const result = await resp.json();
-    if (result.ok) {
-      showToast(`${company || 'Job'} added to dedup`);
-      refresh();
-    } else {
-      showToast(result.error || 'Already in dedup', true);
-    }
-  } catch(e) { showToast('Error: ' + e.message, true); }
+    const res = await r.json();
+    if (res.ok) { toast(res.message); input.value = ''; refresh(); }
+    else { toast(res.error || 'Failed', 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
 }
 
-function showToast(msg, isError) {
+function renderSkip() {
+  const el = document.getElementById('p-skip');
+  const list = D.skip_list || [];
+  const catBadge = c => ({csp:'b-csp',limit:'b-limit',technical:'b-technical',captcha:'b-captcha'}[c]||'b-manual');
+  el.innerHTML = `
+    <div class="skip-add-bar">
+      <input type="text" id="skip-name" placeholder="Company name..." />
+      <input type="text" id="skip-reason" placeholder="Reason (e.g. CSP blocks automation)" style="flex:2" />
+      <select id="skip-cat">
+        <option value="csp">CSP Block</option>
+        <option value="limit">App Limit</option>
+        <option value="technical">Technical</option>
+        <option value="captcha">CAPTCHA</option>
+        <option value="manual">Other</option>
+      </select>
+      <button class="btn-add-skip" onclick="addSkip()">Add to Skip List</button>
+    </div>
+    ${list.length === 0 ? '<div class="empty">No companies in skip list</div>' : `<table>
+    <tr><th>Company</th><th>Category</th><th>Reason</th><th></th></tr>
+    ${list.map(c => `<tr>
+      <td><strong>${h(c.name)}</strong></td>
+      <td><span class="badge ${catBadge(c.category)}">${h(c.category||'manual')}</span></td>
+      <td>${h(c.reason)}</td>
+      <td><button class="btn-remove" onclick="removeSkip('${h(c.name).replace(/'/g,"\\'")}')">Remove</button></td>
+    </tr>`).join('')}
+    </table>`}`;
+}
+
+async function addSkip() {
+  const name = document.getElementById('skip-name').value.trim();
+  const reason = document.getElementById('skip-reason').value.trim();
+  const category = document.getElementById('skip-cat').value;
+  if (!name) { toast('Enter a company name', 1); return; }
+  try {
+    const r = await fetch('/api/skip-list/add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, reason, category})
+    });
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error, 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
+}
+
+async function removeSkip(name) {
+  if (!confirm('Remove "' + name + '" from skip list?')) return;
+  try {
+    const r = await fetch('/api/skip-list/remove', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name})
+    });
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error, 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
+}
+
+function toast(msg, err) {
   const t = document.getElementById('toast');
   t.textContent = msg;
-  t.className = 'toast' + (isError ? ' error' : '');
+  t.className = 'toast' + (err ? ' error' : '');
   t.style.display = 'block';
   setTimeout(() => t.style.display = 'none', 3000);
 }
 
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function h(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 refresh();
 setInterval(() => {
-  countdown--;
-  document.getElementById('timer').textContent = `Refreshing in ${countdown}s`;
-  if (countdown <= 0) { refresh(); countdown = 30; }
+  cd--;
+  document.getElementById('timer').textContent = 'Refreshing in ' + cd + 's';
+  if (cd <= 0) { refresh(); cd = 30; }
 }, 1000);
 </script>
 </body>
@@ -839,16 +1063,34 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if self.path == "/api/dedup":
+        if self.path == "/api/mark-applied":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            success = add_manual_dedup(body.get("url", ""), body.get("company", ""), body.get("title", ""))
-            self.send_json({"ok": success} if success else {"ok": False, "error": "Already exists or empty URL"})
+            result = mark_as_applied(body.get("url", ""), body.get("company", ""), body.get("title", ""))
+            self.send_json(result)
 
         elif self.path == "/api/stage":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = update_stage(body.get("search", ""), body.get("stage", ""), body.get("notes", ""))
+            result = update_stage(body.get("search", ""), body.get("stage", ""))
+            self.send_json(result)
+
+        elif self.path == "/api/add-job":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = add_job(body.get("url", ""), body.get("destination", "queue"))
+            self.send_json(result)
+
+        elif self.path == "/api/skip-list/add":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = add_to_skip_list(body.get("name", ""), body.get("reason", ""), body.get("category", "manual"))
+            self.send_json(result)
+
+        elif self.path == "/api/skip-list/remove":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = remove_from_skip_list(body.get("name", ""))
             self.send_json(result)
         else:
             self.send_response(404)
@@ -863,11 +1105,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = http.server.HTTPServer(("127.0.0.1", PORT), DashboardHandler)
-    print(f"\n  Job Search Dashboard v2 running at http://localhost:{PORT}")
+    print(f"\n  Job Search Dashboard v3 running at http://localhost:{PORT}")
     print(f"  Workspace: {WORKSPACE}")
-    print(f"  Queue:     {QUEUE_FILE}")
-    print(f"  Tracker:   {TRACKER_FILE}")
-    print(f"  Agents:    {JOBS_JSON}")
     print(f"  Press Ctrl+C to stop\n")
     try:
         server.serve_forever()

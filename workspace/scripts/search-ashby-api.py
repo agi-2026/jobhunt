@@ -147,6 +147,10 @@ COMPANY_INFO = {
     'kalshi': {'name': 'Kalshi', 'info': 'Prediction market exchange (Sequoia)', 'score': 70, 'h1b': 'Likely'},
     'saronic': {'name': 'Saronic', 'info': 'Autonomous maritime vehicles (a16z, $600M Series C)', 'score': 70, 'h1b': 'Likely'},
     'character': {'name': 'Character.AI', 'info': 'Chatbot/character platform ($1B+, a16z)', 'score': 90, 'h1b': 'Likely'},
+    # Added 2026-02-17 (discovered from manual-apply cross-check)
+    'cursor': {'name': 'Anysphere (Cursor)', 'info': 'AI code editor ($9B, a16z/Thrive)', 'score': 95, 'h1b': 'Likely'},
+    'claylabs': {'name': 'Clay', 'info': 'AI data enrichment ($1.3B, Sequoia)', 'score': 80, 'h1b': 'Likely'},
+    'stainlessapi': {'name': 'Stainless', 'info': 'API SDK generation (OpenAI infra partner)', 'score': 75, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):

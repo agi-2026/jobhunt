@@ -5,6 +5,9 @@ description: Lever ATS application agent. Simple native forms, resume upload, di
 
 # Apply Lever — Application Skill
 
+## STATUS: DISABLED (2026-02-17)
+All Lever forms now include invisible hCaptcha verification. Headless Chrome cannot solve hCaptcha. The orchestrator no longer dispatches Lever subagents. Lever jobs remain in the queue for Howard to apply manually.
+
 ## Browser Profile
 Always use `profile="lever"` for ALL browser actions (snapshot, navigate, act, upload).
 
@@ -116,7 +119,12 @@ Lever forms can cause browser refs to go stale on large pages. Strategy:
 - Fastest target: 2-4 minutes per application when working correctly
 - Main failure mode is ref staleness, not form complexity
 
+## Browser Safety Rules
+- **SVG className bug:** In evaluate scripts, NEVER use `el.className.substring()` or `el.className.includes()`. SVG elements return `SVGAnimatedString` (not a string). Use `el.getAttribute('class') || ''` instead.
+- **Narrow selectors:** Never use broad selectors like `button, [class*=code]`. Always scope to a specific section.
+
 ## Skip Rules
 - CAPTCHA (rare on Lever): SKIP + WhatsApp Howard
 - 3 failed retries: SKIP with reason
 - Non-US locations: SKIP (verify location before applying)
+- Check `skip-companies.json` — companies listed there must be SKIPPED

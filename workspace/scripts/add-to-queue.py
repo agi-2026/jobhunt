@@ -32,9 +32,22 @@ import json
 import re
 from datetime import datetime
 
-QUEUE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'job-queue.md')
+WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')
+SKIP_LIST_PATH = os.path.join(WORKSPACE, 'skip-companies.json')
 
-SKIP_COMPANIES = {'openai', 'databricks'}
+
+def load_skip_companies():
+    """Load skip companies from skip-companies.json."""
+    try:
+        with open(SKIP_LIST_PATH, 'r') as f:
+            data = json.load(f)
+        return {c['name'].lower() for c in data.get('companies', [])}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {'openai', 'databricks'}
+
+
+SKIP_COMPANIES = load_skip_companies()
 
 def parse_queue():
     """Parse queue into sections: preamble, do_not_apply, in_progress, pending entries."""

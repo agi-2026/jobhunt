@@ -147,7 +147,16 @@ Before timeout, append 3-line summary to `memory/session-YYYY-MM-DD.md`.
 - Forms can have 30-50+ fields (most auto-filled by MyGreenhouse)
 - "Remove file" button means resume is already uploaded — skip upload step
 
+## Browser Safety Rules
+- **SVG className bug:** In evaluate scripts, NEVER use `el.className.substring()` or `el.className.includes()`. SVG elements return `SVGAnimatedString` (not a string). Use `el.getAttribute('class') || ''` instead.
+- **Narrow selectors for verification code:** When looking for the email verification code input, NEVER use broad selectors like `locator('button, [class*=security], [class*=verify], [class*=code]')` — this matches 200+ elements (country dial code buttons, etc.). Instead, look specifically for:
+  - Text containing "verification code" or "security code" on the page
+  - Small `input[maxlength="1"]` elements near that text
+  - Or use the atomic `greenhouse-verify-code.js` script which handles this correctly
+- **Stale refs:** After any page change, navigation, or long delay, take a fresh snapshot before clicking elements. Old ref IDs (e.g. "e9", "e18") become invalid.
+
 ## Skip Rules
 - Databricks: cross-origin iframe cannot be automated → SKIP
 - CAPTCHA: SKIP + WhatsApp Howard
 - 3 failed retries: SKIP with reason
+- Check `skip-companies.json` — companies listed there must be SKIPPED

@@ -24,18 +24,26 @@ workspace/skills/*/scripts/fill-custom-answers.js
 workspace/.queue.lock
 workspace/companies-to-detect.txt
 .locks/
+.queue.lock
 workspace/job-queue.md
 workspace/job-queue-archive.md
 workspace/job-tracker.md
 workspace/dedup-index.md
 workspace/manual-dedup.md
 workspace/yield-log.json
+yield-log.json
 workspace/memory/
 !workspace/memory/.gitkeep
 workspace/analysis/
 !workspace/analysis/.gitkeep
 workspace/resume/
 !workspace/resume/.gitkeep
+memory/
+
+# Root-level symlinks to runtime data
+/job-queue.md
+/job-tracker.md
+/dedup-index.md
 
 # =============================================================================
 # CRON — personal job configuration

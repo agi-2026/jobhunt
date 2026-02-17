@@ -12,6 +12,7 @@ from datetime import datetime
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, "job-queue.md")
 DEDUP_PATH = os.path.join(WORKSPACE, "dedup-index.md")
+TRACKER_PATH = os.path.join(WORKSPACE, "job-tracker.md")
 LOCK_PATH = os.path.join(WORKSPACE, ".queue.lock")
 
 def _do_mark_applied(url, company, title):
@@ -96,6 +97,34 @@ def _do_mark_applied(url, company, title):
         print(f"DEDUP: Updated to APPLIED")
     else:
         print(f"DEDUP: Already APPLIED")
+
+    # 3. Add to job-tracker.md if not already there
+    tracker_updated = False
+    if os.path.exists(TRACKER_PATH):
+        with open(TRACKER_PATH, "r") as f:
+            tracker_content = f.read()
+        # Check if URL already in tracker
+        if url not in tracker_content and norm_url not in tracker_content:
+            entry = f"\n### {company or 'Unknown'} — {title or 'Unknown'}\n"
+            entry += f"- **Stage:** Applied\n"
+            entry += f"- **Date Applied:** {datetime.now().strftime('%Y-%m-%d')}\n"
+            entry += f"- **Link:** {url}\n"
+            entry += f"- **Notes:** Auto-applied by agent\n"
+
+            if "## Priority Follow-ups" in tracker_content:
+                tracker_content = tracker_content.replace(
+                    "## Priority Follow-ups", entry + "\n## Priority Follow-ups"
+                )
+            else:
+                tracker_content += entry
+            with open(TRACKER_PATH, "w") as f:
+                f.write(tracker_content)
+            tracker_updated = True
+            print(f"TRACKER: Added entry")
+        else:
+            print(f"TRACKER: Already exists")
+    else:
+        print(f"TRACKER: File not found, skipping")
 
     print(f"DONE: {company} — {title}")
 

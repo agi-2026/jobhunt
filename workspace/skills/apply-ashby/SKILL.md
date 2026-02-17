@@ -117,8 +117,14 @@ Before timeout, append 3-line summary to `memory/session-YYYY-MM-DD.md`:
 - No CAPTCHA, no email verification — clean direct forms
 - Typical form: name, email, phone, resume, LinkedIn, 2-3 yes/no toggles, 0-2 essay questions
 
+## Browser Safety Rules
+- **SVG className bug:** In evaluate scripts, NEVER use `el.className.substring()` or `el.className.includes()`. SVG elements return `SVGAnimatedString` (not a string). Use `el.getAttribute('class') || ''` instead.
+- **Narrow selectors:** Never use broad selectors like `button, [class*=code]` — Ashby forms have hundreds of buttons. Always scope selectors to a specific section (e.g. `document.querySelector('.captcha-container button')`).
+- **Stale refs:** After any page change, navigation, or long delay, take a fresh snapshot before clicking elements. Old ref IDs (e.g. "e9", "e18") become invalid.
+
 ## Skip Rules
 - Sesame AI: per-employer limit reached → SKIP
 - OpenAI: NO-AUTO (already filtered by `--actionable`)
 - CAPTCHA: SKIP + WhatsApp Howard
 - 3 failed retries on same job: SKIP with reason
+- Check `skip-companies.json` — companies listed there must be SKIPPED

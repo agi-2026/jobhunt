@@ -1,0 +1,12 @@
+{
+  "companies": [
+    {"name": "OpenAI", "reason": "5-app/180-day limit. 2 used, 3 remaining. Manual apply only.", "category": "limit"},
+    {"name": "Databricks", "reason": "Cross-origin iframe — cannot automate. Howard applies manually.", "category": "technical"},
+    {"name": "Stripe", "reason": "CSP blocks browser automation (ERR_BLOCKED_BY_CSP).", "category": "csp"},
+    {"name": "Hex", "reason": "CSP blocks browser automation (ERR_BLOCKED_BY_CSP).", "category": "csp"},
+    {"name": "Hex Technologies", "reason": "CSP blocks browser automation (ERR_BLOCKED_BY_CSP).", "category": "csp"},
+    {"name": "Sesame AI", "reason": "Ashby per-employer 90-day application limit reached.", "category": "limit"},
+    {"name": "Meta", "reason": "React file upload widget cannot be automated.", "category": "technical"},
+    {"name": "Reka AI", "reason": "reCAPTCHA blocks automation.", "category": "captcha"}
+  ]
+}

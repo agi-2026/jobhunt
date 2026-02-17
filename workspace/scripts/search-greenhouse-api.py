@@ -111,6 +111,8 @@ COMPANY_INFO = {
     'gleanwork': {'info': 'Enterprise AI search ($150M Series F, Sequoia)', 'score': 90, 'h1b': 'Confirmed'},
     'hextechnologies': {'info': 'Data science/analytics workspace (a16z+Sequoia)', 'score': 75, 'h1b': 'Likely'},
     'blackforestlabs': {'info': 'Flux image generation models (a16z)', 'score': 95, 'h1b': 'Likely'},
+    # Added 2026-02-17
+    'vectranetworks': {'info': 'AI cybersecurity/threat detection ($200M+)', 'score': 70, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):
