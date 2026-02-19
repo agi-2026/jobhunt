@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 """
-Refresh the Anthropic auth token in OpenClaw.
-Validates the current token, and if expired, accepts a new one.
+Check and refresh the Anthropic auth token in OpenClaw.
+
+Supports both legacy "token" type and new "oauth" type profiles.
+For OAuth profiles, uses the refresh token to get a new access token.
 
 Usage:
-  python3 scripts/refresh-token.py              # Check current token health
+  python3 scripts/refresh-token.py              # Check + auto-refresh if needed
   python3 scripts/refresh-token.py check        # Same as above
-  python3 scripts/refresh-token.py set <token>  # Set a new token (joins multi-line)
-
-Tip: If the token wraps across lines, quote it:
-  python3 scripts/refresh-token.py set "sk-ant-oat01-...full...token"
-
-After setting a new token, restart the gateway:
-  kill $(lsof -ti :18789) && pnpm openclaw gateway --port 18789
+  python3 scripts/refresh-token.py refresh      # Force refresh via OAuth endpoint
 """
 import sys
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 import ssl
 
 AUTH_PROFILES = os.path.expanduser("~/.openclaw/agents/main/agent/auth-profiles.json")
-GATEWAY_PORT = 18789
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 
 
 def load_profiles():
@@ -33,112 +31,113 @@ def load_profiles():
 def save_profiles(data):
     with open(AUTH_PROFILES, "w") as f:
         json.dump(data, f, indent=2)
-    print(f"SAVED: {AUTH_PROFILES}")
 
 
-def check_token(token: str) -> tuple:
-    """Check if a token is valid. Tries Bearer auth (OAuth/setup-token) then x-api-key."""
-    ctx = ssl.create_default_context()
+def get_cred_info(profiles):
+    """Extract credential info from auth profile."""
+    cred = profiles["profiles"]["anthropic:default"]
+    ctype = cred.get("type", "token")
+    if ctype == "oauth":
+        return {
+            "type": "oauth",
+            "access": cred.get("access", ""),
+            "refresh": cred.get("refresh", ""),
+            "expires": cred.get("expires", 0),
+        }
+    else:
+        return {
+            "type": "token",
+            "access": cred.get("token", ""),
+            "refresh": "",
+            "expires": 0,
+        }
+
+
+def refresh_oauth(refresh_token):
+    """Refresh token via Anthropic OAuth endpoint. Returns new creds dict."""
     payload = json.dumps({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "hi"}]
+        "grant_type": "refresh_token",
+        "client_id": CLIENT_ID,
+        "refresh_token": refresh_token,
     }).encode()
 
-    # Try both auth methods — setup-tokens use Bearer, API keys use x-api-key
-    auth_methods = [
-        ("Bearer (OAuth)", {"Authorization": f"Bearer {token}"}),
-        ("x-api-key", {"x-api-key": token}),
-    ]
+    ctx = ssl.create_default_context()
+    req = urllib.request.Request(TOKEN_URL, data=payload, headers={
+        "Content-Type": "application/json",
+        "User-Agent": "claude-code/2.1.42",
+    })
 
-    last_error = ""
-    for method_name, auth_headers in auth_methods:
-        try:
-            headers = {
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-                **auth_headers,
-            }
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages",
-                data=payload, headers=headers,
-            )
-            urllib.request.urlopen(req, timeout=10, context=ctx)
-            return True, f"Valid ({method_name})"
-        except urllib.error.HTTPError as e:
-            if e.code in (400, 429):
-                # Auth succeeded but request had issues — token is valid
-                return True, f"Valid ({method_name})"
-            elif e.code == 401:
-                body = e.read().decode("utf-8", errors="ignore")
-                try:
-                    detail = json.loads(body)
-                    last_error = detail.get("error", {}).get("message", "Auth failed")
-                except Exception:
-                    last_error = "Auth failed"
-                continue  # Try next method
-            else:
-                body = e.read().decode("utf-8", errors="ignore")
-                return False, f"HTTP {e.code}: {body[:200]}"
-        except Exception as e:
-            return False, f"Connection error: {e}"
-
-    return False, f"EXPIRED (401): {last_error}"
+    resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+    body = json.loads(resp.read().decode())
+    return {
+        "access": body["access_token"],
+        "refresh": body.get("refresh_token", refresh_token),
+        "expires": int(time.time() * 1000) + (body.get("expires_in", 3600) * 1000) - (5 * 60 * 1000),
+    }
 
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
 
-    if cmd == "check":
+    if cmd in ("check", "refresh"):
         profiles = load_profiles()
-        token = profiles["profiles"]["anthropic:default"]["token"]
-        masked = token[:15] + "..." + token[-4:]
-        print(f"Current token: {masked}")
-        print(f"Length: {len(token)} chars")
-        ok, msg = check_token(token)
-        if ok:
-            print(f"STATUS: OK — {msg}")
+        info = get_cred_info(profiles)
+        masked = f"{info['access'][:15]}...{info['access'][-4:]}" if info["access"] else "NONE"
+
+        print(f"Profile type: {info['type']}")
+        print(f"Access token: {masked} ({len(info['access'])} chars)")
+
+        now = int(time.time() * 1000)
+        if info["expires"] > 0:
+            remaining_ms = info["expires"] - now
+            remaining_min = remaining_ms / 60000
+            if remaining_ms > 0:
+                print(f"Expires in: {remaining_min:.0f} min ({remaining_min/60:.1f}h)")
+            else:
+                print(f"EXPIRED: {-remaining_min:.0f} min ago")
         else:
-            print(f"STATUS: FAILED — {msg}")
-            print("\nTo fix:")
-            print('  python3 scripts/refresh-token.py set "sk-ant-oat01-...full-token..."')
+            print("Expires: unknown (legacy token type)")
+
+        has_refresh = bool(info.get("refresh"))
+        print(f"Refresh token: {'present' if has_refresh else 'MISSING'}")
+
+        # Check if we should refresh
+        should_refresh = cmd == "refresh"
+        if info["expires"] > 0 and info["expires"] - now < 10 * 60 * 1000:
+            should_refresh = True
+            print("\nToken near expiry or expired, auto-refreshing...")
+
+        if should_refresh and has_refresh:
+            try:
+                new_creds = refresh_oauth(info["refresh"])
+                profiles["profiles"]["anthropic:default"] = {
+                    "type": "oauth",
+                    "provider": "anthropic",
+                    "access": new_creds["access"],
+                    "refresh": new_creds["refresh"],
+                    "expires": new_creds["expires"],
+                }
+                profiles["usageStats"]["anthropic:default"] = {"lastUsed": 0, "errorCount": 0}
+                save_profiles(profiles)
+                new_masked = f"{new_creds['access'][:15]}...{new_creds['access'][-4:]}"
+                new_remaining = (new_creds["expires"] - int(time.time() * 1000)) / 60000
+                print(f"\nREFRESHED: {new_masked} valid for {new_remaining:.0f} min")
+                print("Gateway will pick up new token on next API call.")
+            except Exception as e:
+                print(f"\nREFRESH FAILED: {e}")
+                sys.exit(1)
+        elif should_refresh and not has_refresh:
+            print("\nCannot refresh: no refresh token available")
+            print("Re-authenticate: python3 scripts/sync-oauth-token.py --force")
             sys.exit(1)
-
-    elif cmd == "set":
-        if len(sys.argv) < 3:
-            print('Usage: python3 scripts/refresh-token.py set "sk-ant-oat01-..."')
-            sys.exit(1)
-        # Join all remaining args (handles tokens split across shell args)
-        new_token = "".join(sys.argv[2:]).strip()
-        if len(new_token) < 80:
-            print(f"ERROR: Token too short ({len(new_token)} chars, need 80+)")
-            print("Tip: The token may have wrapped across lines. Quote it:")
-            print('  python3 scripts/refresh-token.py set "sk-ant-oat01-...full...token"')
-            sys.exit(1)
-
-        masked = new_token[:15] + "..." + new_token[-4:]
-        print(f"New token: {masked} ({len(new_token)} chars)")
-
-        # Validate
-        print("Validating...")
-        ok, msg = check_token(new_token)
-        if not ok:
-            print(f"WARNING: Validation failed — {msg}")
-            print("Saving anyway (OpenClaw may use different auth flow)...")
-
-        profiles = load_profiles()
-        profiles["profiles"]["anthropic:default"]["token"] = new_token
-        profiles["usageStats"]["anthropic:default"] = {
-            "lastUsed": 0, "errorCount": 0
-        }
-        save_profiles(profiles)
-        print(f"\nSUCCESS: Token updated.")
-        print("Now restart gateway:")
-        print(f"  kill $(lsof -ti :{GATEWAY_PORT}) 2>/dev/null; cd ~/Desktop/Job\\ Search/openclaw && pnpm openclaw gateway --port {GATEWAY_PORT}")
+        elif info["expires"] > 0 and info["expires"] - now > 10 * 60 * 1000:
+            print(f"\nSTATUS: OK — token valid for {remaining_min:.0f} min")
+        else:
+            print("\nSTATUS: OK (legacy token, no expiry tracking)")
 
     else:
         print(f"Unknown command: {cmd}")
-        print('Usage: python3 scripts/refresh-token.py [check | set "token"]')
+        print("Usage: python3 scripts/refresh-token.py [check | refresh]")
         sys.exit(1)
 
 

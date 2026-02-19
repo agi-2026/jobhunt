@@ -10,9 +10,10 @@ Always use `profile="ashby"` for ALL browser actions (snapshot, navigate, act, u
 
 ## Queue Selection
 ```
-exec: python3 scripts/queue-summary.py --actionable --ats ashby --top 10
+exec: python3 scripts/queue-summary.py --actionable --ats ashby --top 10 --full-url
 ```
-Pick highest-score PENDING job. Read just that job's entry from `job-queue.md` to get URL.
+Pick the highest-score PENDING job directly from this output (URL is already full and exact).
+Do NOT read `job-queue.md` for URL lookup.
 
 ## Application Flow
 

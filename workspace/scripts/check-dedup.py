@@ -16,7 +16,7 @@ Also supports batch mode via stdin (one URL per line):
 import sys
 import os
 
-DEDUP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dedup-index.md')
+DEDUP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'dedup-index.md')
 
 def load_dedup_index():
     """Load dedup index into URL set and company+title set."""

@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CHECK_DEDUP = os.path.join(SCRIPT_DIR, 'check-dedup.py')
 ADD_TO_QUEUE = os.path.join(SCRIPT_DIR, 'add-to-queue.py')
 
@@ -214,17 +214,41 @@ def search_company(slug, auto_add=False):
 
     print(f'FOUND {len(relevant)} relevant US/remote jobs at {company_name} (of {len(all_jobs)} total)')
 
+    if not relevant:
+        return 0, 0
+
+    # Batch score with Gemini for semantic relevance
+    from gemini_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
+    gemini_input = [{'title': j.get('text', ''), 'company': company_name,
+                     'team': j.get('categories', {}).get('team', '')}
+                    for j in relevant]
+    gemini_scores = batch_score_jobs(gemini_input)
+
     new_count = 0
     dup_count = 0
+    filtered_count = 0
 
-    for job in relevant:
+    for job, gscore in zip(relevant, gemini_scores):
         url = job.get('hostedUrl', '')
         title = job.get('text', '')
         location = job.get('categories', {}).get('location', 'Unknown')
         workplace = job.get('workplaceType', '')
         if workplace == 'remote':
             location = f"{location} (Remote)" if location else "Remote"
-        total, breakdown = score_job(job, slug)
+
+        # Filter by Gemini relevance
+        if not gscore['relevant']:
+            filtered_count += 1
+            print(f'  FILTERED [{gscore["score"]}] {company_name} — {title} | {gscore["reason"]}')
+            continue
+
+        # Score using Gemini match score
+        r = recency_score(job)
+        s = 30
+        c = COMPANY_INFO.get(slug, {}).get('score', 70)
+        m = gscore['score']
+        total = r + s + c + m
+        breakdown = f'recency={r} salary={s} company={c} match={m}(gemini:{gscore["reason"]})'
 
         if check_dedup(url):
             dup_count += 1
@@ -246,13 +270,16 @@ def search_company(slug, auto_add=False):
                 'h1b': info.get('h1b', 'Unknown'),
                 'source': 'Lever API',
                 'scoreBreakdown': breakdown,
-                'whyMatch': f'Relevant AI/ML role at {company_name}',
+                'whyMatch': gscore['reason'],
                 'autoApply': True
             }
             result = add_to_queue(entry)
             print(f'  {result}')
         else:
             print(f'  [{total}] {company_name} — {title} ({location}) {url}')
+
+    if filtered_count:
+        print(f'  (Gemini filtered {filtered_count} irrelevant jobs)')
 
     return new_count, dup_count
 

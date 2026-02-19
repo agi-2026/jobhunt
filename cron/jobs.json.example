@@ -4,56 +4,8 @@
     {
       "id": "GENERATE-UUID-1",
       "agentId": "main",
-      "name": "Email Monitor",
-      "enabled": true,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 8,10,12,14,16,18,20 * * *",
-        "tz": "America/Chicago"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "You are the EMAIL MONITOR. AGENTS.md has your full instructions.\n\n## THIS SESSION\n1. Run: gog gmail search 'is:unread' --account YOUR_EMAIL --json\n2. For EACH unread email, classify and act:\n\n**URGENT (WhatsApp immediately):**\n- Interview invite or scheduling link → WhatsApp + exec: python3 scripts/update-tracker-stage.py \"Company\" \"Phone Screen\" \"details\"\n- Recruiter outreach → WhatsApp + exec: python3 scripts/update-tracker-stage.py \"Company\" \"Response\" \"recruiter name\"\n- Offer or visa related → WhatsApp immediately\n\n**NORMAL (update tracker):**\n- Application confirmation → exec: python3 scripts/update-tracker-stage.py \"Company\" \"Confirmed\"\n- Rejection → exec: python3 scripts/update-tracker-stage.py \"Company\" \"Rejected\" \"reason if given\"\n\n**LOW:**\n- Job alert email → extract promising jobs, add to queue via exec: python3 scripts/add-to-queue.py\n\n**IGNORE:** Spam, newsletters, non-job emails\n\nCRITICAL: Use the update-tracker-stage.py script to update stages.\nSkip non-job emails silently. Only WhatsApp for URGENT items.",
-        "model": "anthropic/claude-haiku-4-5-20251001",
-        "timeoutSeconds": 180
-      },
-      "delivery": {
-        "mode": "announce",
-        "channel": "whatsapp",
-        "to": "+1XXXXXXXXXX"
-      }
-    },
-    {
-      "id": "GENERATE-UUID-2",
-      "agentId": "main",
-      "name": "Evening Summary",
-      "enabled": true,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 21 * * *",
-        "tz": "America/Chicago"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "EVENING SUMMARY — Compile today's job search activity.\n\n1. Get stats: exec: python3 scripts/read-memory.py stats\n2. Get today's session: exec: python3 scripts/read-memory.py warm session\n3. Get health: exec: python3 scripts/health-check.py\n4. Get analysis: exec: python3 scripts/analyze-logs.py --summary\n\nCompile into WhatsApp message:\n- Jobs found today / Applications submitted today\n- Pipeline: Applied | Confirmed | Phone Screens | Interviews | Offers | Rejected\n- Top agent issues (from health check)\n- Companies that responded positively\n- Action items for tomorrow\n\nKeep it concise — bullet points, max 20 lines.",
-        "model": "anthropic/claude-haiku-4-5-20251001",
-        "timeoutSeconds": 120
-      },
-      "delivery": {
-        "mode": "announce",
-        "channel": "whatsapp",
-        "to": "+1XXXXXXXXXX"
-      }
-    },
-    {
-      "id": "GENERATE-UUID-3",
-      "agentId": "main",
       "name": "Search Agent",
-      "description": "Producer agent: searches job boards via API-first, scores jobs, adds to priority queue",
+      "description": "Producer agent: API-first job discovery, scoring, and queue insertion",
       "enabled": true,
       "schedule": {
         "kind": "cron",
@@ -64,9 +16,9 @@
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are the SEARCH AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n**BRAVE SEARCH API**: API key is in .env file\nEndpoint: https://api.search.brave.com/res/v1/web/search?q=<query>&count=20\nHeader: X-Subscription-Token: <key>\n\n## THIS SESSION — API-FIRST WORKFLOW\n1. Read search-rotation.md — pick DUE boards/queries\n2. Read company-watchlist.md — pick 2-3 DUE companies\n\n**STEP 1 — API pass (fast, no browser):**\n- For each DUE Greenhouse company: exec: python3 scripts/search-greenhouse-api.py <slug> --add\n- Run HN scan: exec: python3 scripts/search-hn-hiring.py --add\n- Brave API: search, extract URLs, check dedup via exec, score, add via exec\n\n**STEP 2 — Browser pass (Ashby/LinkedIn/YC only):**\n- Read scripts/scrape-board.js ONCE\n- Navigate to board URL, wait 5s, run via evaluate (timeoutMs: 30000)\n- For each job: exec: python3 scripts/check-dedup.py \"<url>\" → score → exec: python3 scripts/add-to-queue.py '<json>'\n\n**STEP 3 — Update rotation timestamps, keep searching until timeout**\n\n**AT END:** Report YIELD: X new jobs found\n\nCRITICAL CONTEXT RULES:\n- NEVER READ dedup-index.md, job-queue.md, or job-tracker.md into context\n- Use exec scripts for dedup checks and queue adds\nNEVER apply to jobs. Only discover and rank.",
-        "model": "anthropic/claude-sonnet-4-5-20250929",
-        "thinking": "medium",
+        "message": "You are the SEARCH AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n## THIS SESSION — API-FIRST WORKFLOW\n1. Read search-rotation.md — pick DUE boards/queries\n2. Read company-watchlist.md — pick 2-3 DUE companies\n3. Run API search:\n- exec: python3 scripts/search-ashby-api.py --all --add\n- exec: python3 scripts/search-greenhouse-api.py --all --add\n- exec: python3 scripts/search-lever-api.py --all --add\n- exec: python3 scripts/search-vc-boards.py --all --add\n4. Brave API fallback: search, dedup-check, score, add\n5. Browser pass only for LinkedIn/YC/custom boards when needed\n\nCRITICAL:\n- Use exec scripts; do not read large queue/dedup files\n- NEVER apply to jobs in this agent",
+        "model": "google/gemini-3-flash-preview",
+        "thinking": "low",
         "timeoutSeconds": 900
       },
       "delivery": {
@@ -76,24 +28,24 @@
       }
     },
     {
-      "id": "GENERATE-UUID-4",
+      "id": "GENERATE-UUID-2",
       "agentId": "main",
-      "name": "Application Agent",
-      "description": "Consumer agent: picks top job from priority queue, applies via browser, logs results",
+      "name": "Application Orchestrator",
+      "description": "Dispatcher agent: preflight + ATS lock checks + parallel subagent spawn",
       "enabled": true,
       "schedule": {
         "kind": "cron",
-        "expr": "*/2 * * * *",
+        "expr": "*/5 * * * *",
         "tz": "America/Chicago"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are the APPLICATION AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n## THIS SESSION\n1. Get queue: exec: python3 scripts/queue-summary.py --top 15\n   Pick highest-score PENDING job (skip NO-AUTO jobs)\n2. For high-score jobs (>=280): exec: python3 scripts/search-connections.py \"Company\"\n   If connections found, mention them naturally in essays\n3. Apply using workflow in AGENTS.md + ats-reference.md for edge cases\n4. For essays: read SOUL.md. For form fields: read form-fields.md\n5. After submit: update job-queue.md status, append to job-tracker.md\n6. LOOP — pick next PENDING job. Max 5 per cycle.\n7. Before timeout: append 3-line summary to memory/session-YYYY-MM-DD.md\n\nCONTEXT RULES:\n- Use exec: python3 scripts/queue-summary.py instead of reading full job-queue.md\n- Use exec: python3 scripts/check-dedup.py \"<url>\" for dedup checks\n- NEVER READ dedup-index.md or job-tracker.md into context\n- Read form-fields.md and SOUL.md ON DEMAND only when filling forms",
-        "model": "anthropic/claude-opus-4-6",
-        "thinking": "medium",
-        "timeoutSeconds": 1800
+        "message": "You are the APPLICATION ORCHESTRATOR.\n\nRun this flow only:\n1) exec: python3 scripts/orchestrator-dispatch.py --json\n2) exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90\n3) For each ATS in [ashby, greenhouse, lever], if ready, spawn ONE subagent in parallel via sessions_spawn.\n\nSpawn requirements:\n- unique label: apply-<ats>-<unix_ms>-<rand4>\n- retry once on \"label already in use\"\n- runTimeoutSeconds: ashby=900, greenhouse=900, lever=600\n- thinking: low\n- cleanup: keep\n\nSubagent task contract (all ATS):\n- lock first, unlock always (scripts/subagent-lock.py)\n- use ATS SKILL.md exactly\n- STRICT browser mode: NEVER action=open, ALWAYS navigate, NEVER pass targetId\n- use queue-summary output directly, process exactly TOP 1 job this run\n- if blocked by captcha/verification, keep pending and continue\n\nAfter spawning, write guardrail log once:\nexec: python3 scripts/log-orchestrator-cycle.py --ashby <...> --greenhouse <...> --lever <...> --runid-ashby \"<...>\" --runid-greenhouse \"<...>\" --runid-lever \"<...>\"\n\nReturn compact ATS lines only (SPAWNED/SKIPPED/ERROR).",
+        "model": "anthropic/claude-sonnet-4-5-20250929",
+        "thinking": "low",
+        "timeoutSeconds": 180
       },
       "delivery": {
         "mode": "announce",
@@ -102,35 +54,10 @@
       }
     },
     {
-      "id": "GENERATE-UUID-5",
+      "id": "GENERATE-UUID-3",
       "agentId": "main",
-      "name": "Analysis Agent",
-      "description": "Daily log analysis: identifies failure patterns, slow operations, and improvement opportunities",
-      "enabled": true,
-      "schedule": {
-        "kind": "cron",
-        "expr": "30 20 * * *",
-        "tz": "America/Chicago"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "You are the ANALYSIS AGENT. Your job is to review today's operations and identify improvements.\n\n## THIS SESSION\n1. Run log analysis: exec: python3 scripts/analyze-logs.py\n2. Run health check: exec: python3 scripts/health-check.py --json\n3. Get pipeline stats: exec: python3 scripts/read-memory.py stats\n4. Read today's session memory: exec: python3 scripts/read-memory.py warm session\n\n## ANALYZE & REPORT\n- **Failure Patterns:** What errors keep recurring? What ATS forms fail?\n- **Timing Issues:** Which agents run too long? Which are stuck?\n- **Quality Gaps:** Application success rate trends.\n- **Search Effectiveness:** Which boards yield the most relevant jobs?\n\n## OUTPUT\nWrite analysis to memory/analysis-YYYY-MM-DD.md\nSend 5-line summary via WhatsApp.",
-        "model": "anthropic/claude-haiku-4-5-20251001",
-        "timeoutSeconds": 300
-      },
-      "delivery": {
-        "mode": "announce",
-        "channel": "whatsapp",
-        "to": "+1XXXXXXXXXX"
-      }
-    },
-    {
-      "id": "GENERATE-UUID-6",
-      "agentId": "main",
-      "name": "Health Monitor",
-      "description": "Checks agent health every 30 min, alerts on consecutive errors or stuck agents",
+      "name": "Health + Analysis Monitor",
+      "description": "Unified monitor for health checks, scheduler updates, and analysis digests",
       "enabled": true,
       "schedule": {
         "kind": "cron",
@@ -141,9 +68,9 @@
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "HEALTH CHECK: exec: python3 scripts/health-check.py\n\nReview the output. Only WhatsApp me if there are CRITICAL or WARNING alerts.\nIf all OK, respond silently (no message).\n\nFor CRITICAL alerts (3+ consecutive errors, agents stuck, token issues):\n- WhatsApp immediately with the alert details\n- Suggest fix action\n\nFor WARNING alerts (1-2 errors, slow runs):\n- Include in next summary, don't WhatsApp separately",
-        "model": "anthropic/claude-haiku-4-5-20251001",
-        "timeoutSeconds": 60
+        "message": "UNIFIED HEALTH + ANALYSIS CYCLE:\n\n1. exec: python3 scripts/health-check.py\n2. exec: python3 scripts/dynamic-scheduler.py\n3. exec: python3 scripts/analyze-logs.py --summary\n4. exec: python3 scripts/read-memory.py stats\n\nFor CRITICAL alerts (stuck agents, repeated failures, token issues):\n- WhatsApp immediately with issue + fix recommendation\n\nFor warnings or regressions:\n- Send concise digest with top findings + suggested fixes\n\nIf all OK and no schedule changes, respond silently.",
+        "model": "google/gemini-3-flash-preview",
+        "timeoutSeconds": 180
       },
       "delivery": {
         "mode": "announce",

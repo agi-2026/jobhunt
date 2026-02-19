@@ -20,7 +20,7 @@ import os
 import re
 from datetime import datetime
 
-TRACKER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'job-tracker.md')
+TRACKER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'job-tracker.md')
 
 VALID_STAGES = [
     'Discovered', 'Applied', 'Confirmed', 'Response',

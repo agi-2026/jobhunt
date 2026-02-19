@@ -7,6 +7,10 @@
     {"name": "Hex Technologies", "reason": "CSP blocks browser automation (ERR_BLOCKED_BY_CSP).", "category": "csp"},
     {"name": "Sesame AI", "reason": "Ashby per-employer 90-day application limit reached.", "category": "limit"},
     {"name": "Meta", "reason": "React file upload widget cannot be automated.", "category": "technical"},
-    {"name": "Reka AI", "reason": "reCAPTCHA blocks automation.", "category": "captcha"}
+    {"name": "Reka AI", "reason": "reCAPTCHA blocks automation.", "category": "captcha"},
+    {"name": "Waymo", "reason": "Maximum application limit reached.", "category": "limit"},
+    {"name": "DeepMind", "reason": "Maximum application limit reached.", "category": "limit"},
+    {"name": "Google DeepMind", "reason": "Maximum application limit reached.", "category": "limit"},
+    {"name": "Anthropic", "reason": "Maximum application limit reached (5-app/180-day window exhausted).", "category": "limit"}
   ]
 }

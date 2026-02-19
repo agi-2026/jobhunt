@@ -17,7 +17,7 @@ import os
 import json
 from datetime import datetime, timezone
 
-WORKSPACE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+WORKSPACE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 YIELD_LOG = os.path.join(WORKSPACE, 'yield-log.json')
 MAX_ENTRIES = 500  # Keep last 500 entries (~2 days at 5min intervals)
 

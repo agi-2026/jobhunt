@@ -23,9 +23,11 @@ import urllib.request
 import urllib.error
 import ssl
 import subprocess
+from queue_utils import filter_jobs, read_queue_sections
 
 QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.dirname(os.path.realpath(__file__))
+LOCK_PATH = os.path.expanduser("~/.openclaw/workspace/.queue.lock")
 
 # SSL context for API calls
 CTX = ssl.create_default_context()
@@ -58,7 +60,7 @@ def parse_url_ashby(url):
     """Extract (company, jobId) from Ashby URL."""
     m = re.match(r"https?://jobs\.ashbyhq\.com/([^/]+)/([^/?#]+)", url)
     if m:
-        return m.group(1), m.group(2)
+        return m.group(1).lower(), m.group(2)
     return None, None
 
 
@@ -74,7 +76,7 @@ def parse_url_lever(url):
     """Extract (company, jobId) from Lever URL."""
     m = re.match(r"https?://jobs\.lever\.co/([^/]+)/([^/?#]+)", url)
     if m:
-        return m.group(1), m.group(2)
+        return m.group(1).lower(), m.group(2)
     return None, None
 
 
@@ -89,52 +91,17 @@ def get_queue_jobs(ats_filter=None):
     """Get pending jobs directly from queue markdown (avoids URL truncation).
     Optionally filtered by ATS type."""
     try:
-        with open(QUEUE_PATH, "r") as f:
-            content = f.read()
+        sections, _stats = read_queue_sections(
+            QUEUE_PATH,
+            LOCK_PATH,
+            no_auto_companies={"openai", "databricks", "pinterest", "deepmind", "google deepmind"},
+        )
     except FileNotFoundError:
         print("ERROR: Queue file not found", file=sys.stderr)
         return []
 
-    jobs = []
-    current = {}
-    in_pending = False
-
-    for line in content.split("\n"):
-        if line.startswith("## ") and ("PENDING" in line.upper() or "Pending" in line):
-            in_pending = True
-            continue
-        if line.startswith("## ") and in_pending:
-            break
-
-        if not in_pending:
-            continue
-
-        if line.startswith("### "):
-            if current.get("url"):
-                jobs.append(current)
-            m = re.match(r"### (.+?) — (.+?)(?:\s*\[(\d+)\])?$", line.strip())
-            if m:
-                current = {"company": m.group(1).strip(), "title": m.group(2).strip(),
-                           "score": int(m.group(3) or 0)}
-            else:
-                current = {"company": line.replace("### ", "").strip(), "title": "Unknown", "score": 0}
-        elif "**URL:**" in line:
-            m = re.search(r"https?://\S+", line)
-            if m:
-                current["url"] = m.group(0).rstrip(")")
-        elif "Auto-Apply: NO" in line or "NO-AUTO" in line:
-            current["no_auto"] = True
-
-    if current.get("url"):
-        jobs.append(current)
-
-    # Filter by ATS type
-    if ats_filter and ats_filter in ATS_URL_PATTERNS:
-        pattern = ATS_URL_PATTERNS[ats_filter]
-        jobs = [j for j in jobs if re.search(pattern, j.get("url", ""))]
-
-    # Exclude NO-AUTO
-    jobs = [j for j in jobs if not j.get("no_auto")]
+    jobs = sections.get("pending", [])
+    jobs = filter_jobs(jobs, actionable_only=True, ats_filter=ats_filter)
 
     # Sort by score descending
     jobs.sort(key=lambda j: j.get("score", 0), reverse=True)
@@ -275,10 +242,13 @@ def remove_from_queue(url):
     """Remove a dead URL from the queue."""
     script = os.path.join(SCRIPTS_DIR, "remove-from-queue.py")
     try:
-        subprocess.run(
-            ["python3", script, url, "--reason", "dead-link"],
+        proc = subprocess.run(
+            ["python3", script, url],
             capture_output=True, text=True, timeout=10
         )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            print(f"  WARNING: Failed to remove {url}: {err}", file=sys.stderr)
     except Exception as e:
         print(f"  WARNING: Failed to remove {url}: {e}", file=sys.stderr)
 
@@ -289,6 +259,12 @@ def main():
     parser.add_argument("--all", action="store_true", help="Check all ATS types")
     parser.add_argument("--remove", action="store_true", help="Remove dead URLs from queue")
     parser.add_argument("--top", type=int, default=50, help="Max URLs to check (default: 50)")
+    parser.add_argument("--timeout", type=int, default=0, help="Max total seconds before early exit (0=unlimited)")
+    parser.add_argument(
+        "--verbose-alive",
+        action="store_true",
+        help="Print each ALIVE URL check (default: summary only)",
+    )
     args = parser.parse_args()
 
     if not args.ats and not args.all:
@@ -299,8 +275,12 @@ def main():
     all_dead = []
     all_alive = []
     all_uncertain = []
+    start_time = time.time()
+    timed_out = False
 
     for ats in ats_types:
+        if timed_out:
+            break
         print(f"\n=== Checking {ats.upper()} URLs ===", file=sys.stderr)
         jobs = get_queue_jobs(ats_filter=ats)
         print(f"  Found {len(jobs)} {ats} jobs in queue", file=sys.stderr)
@@ -312,6 +292,11 @@ def main():
         jobs = jobs[:args.top]
 
         for i, job in enumerate(jobs):
+            if args.timeout > 0 and (time.time() - start_time) > args.timeout:
+                print(f"  TIMEOUT after {args.timeout}s — stopping early", file=sys.stderr)
+                timed_out = True
+                break
+
             url = job["url"]
             company = job["company"]
             title = job["title"]
@@ -326,7 +311,10 @@ def main():
                     print(f"    -> Removed from queue", file=sys.stderr)
             elif status == "ALIVE":
                 all_alive.append(job)
-                print(f"  [{i+1}/{len(jobs)}] ALIVE: {company} — {title}", file=sys.stderr)
+                if args.verbose_alive:
+                    print(f"  [{i+1}/{len(jobs)}] ALIVE: {company} — {title}", file=sys.stderr)
+                elif (i + 1) % 10 == 0:
+                    print(f"  [{i+1}/{len(jobs)}] progress: alive={len(all_alive)} dead={len(all_dead)} uncertain={len(all_uncertain)}", file=sys.stderr)
             else:
                 all_uncertain.append({**job, "reason": reason})
                 print(f"  [{i+1}/{len(jobs)}] ???: {company} — {title} ({reason})", file=sys.stderr)

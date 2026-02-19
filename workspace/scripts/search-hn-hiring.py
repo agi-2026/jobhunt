@@ -23,7 +23,7 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from datetime import datetime
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CHECK_DEDUP = os.path.join(SCRIPT_DIR, 'check-dedup.py')
 ADD_TO_QUEUE = os.path.join(SCRIPT_DIR, 'add-to-queue.py')
 
@@ -41,6 +41,7 @@ TITLE_RE = re.compile(
 SALARY_RE = re.compile(r'\$[\d,]+[kK]?\s*[-–]\s*\$?[\d,]+[kK]?|\$[\d,]+[kK]?\+', re.I)
 LOCATION_RE = re.compile(r'\b(remote|onsite|hybrid|san francisco|sf|nyc|new york|bay area|seattle|austin|boston|chicago|los angeles|la)\b', re.I)
 H1B_RE = re.compile(r'\bh-?1b\b|\bvisa.?sponsor', re.I)
+EXCLUDE_RE = re.compile(r'\b(intern|internship|contractor|contract|part[\s-]?time)\b', re.IGNORECASE)
 
 def fetch_latest_thread():
     """Find the latest 'Who is Hiring?' thread via Algolia API."""
@@ -87,6 +88,10 @@ def parse_posting(comment):
     company = parts[0].strip()[:80] if parts else 'Unknown'
     title = parts[1].strip()[:80] if len(parts) > 1 else 'AI/ML Role'
     location = parts[2].strip()[:80] if len(parts) > 2 else ''
+
+    # Skip internships, contractors, and part-time
+    if EXCLUDE_RE.search(title) or EXCLUDE_RE.search(first_line):
+        return None
 
     # Fallback location detection
     if not location:

@@ -32,7 +32,7 @@ import json
 import re
 from datetime import datetime
 
-WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')
 SKIP_LIST_PATH = os.path.join(WORKSPACE, 'skip-companies.json')
 
@@ -180,6 +180,16 @@ def main():
     title = job.get('title', '')
     url = job.get('url', '')
     score = job.get('score', 0)
+
+    # Reject internships, contractors, part-time, and non-engineering roles
+    EXCLUDE_RE = re.compile(r'\b(intern|internship|contractor|contract|part[\s-]?time)\b', re.IGNORECASE)
+    NON_ENG_RE = re.compile(r'\b(product manager|program manager|product designer|ux designer|graphic designer|content writer|copywriter|recruiter|talent acquisition|account executive|sales engineer|customer success|compliance|trust & safety operations|field safety|ehs|hse|clinical research|physician(?! ai)|nurse|facilities manager)\b', re.IGNORECASE)
+    if EXCLUDE_RE.search(title):
+        print(f"SKIPPED — {company} — {title} (not full-time)")
+        sys.exit(0)
+    if NON_ENG_RE.search(title):
+        print(f"SKIPPED — {company} — {title} (non-engineering role)")
+        sys.exit(0)
 
     # Check skip companies
     if company.lower() in SKIP_COMPANIES and job.get('autoApply', True):

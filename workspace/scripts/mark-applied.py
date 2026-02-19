@@ -9,7 +9,7 @@ import os
 import fcntl
 from datetime import datetime
 
-WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, "job-queue.md")
 DEDUP_PATH = os.path.join(WORKSPACE, "dedup-index.md")
 TRACKER_PATH = os.path.join(WORKSPACE, "job-tracker.md")

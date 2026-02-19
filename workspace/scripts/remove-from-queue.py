@@ -13,7 +13,7 @@ Usage:
 import sys, os, re, fcntl
 from datetime import datetime
 
-WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 QUEUE_PATH = os.path.join(WORKSPACE, "job-queue.md")
 DEDUP_PATH = os.path.join(WORKSPACE, "dedup-index.md")
 LOCK_PATH = os.path.join(WORKSPACE, ".queue.lock")

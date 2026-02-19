@@ -15,10 +15,10 @@ import os
 import time
 
 LOCKS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
     ".locks"
 )
-STALE_SECONDS = 25 * 60  # 25 minutes (subagent timeout 15min + 10min buffer)
+STALE_SECONDS = 25 * 60  # 25 minutes (15m timeout + 10m buffer)
 
 
 def lock_path(ats_type):
@@ -28,7 +28,25 @@ def lock_path(ats_type):
 def is_stale(path):
     try:
         age = time.time() - os.path.getmtime(path)
-        return age > STALE_SECONDS
+        if age > STALE_SECONDS:
+            return True
+
+        # Lock file format:
+        #   line1: unix timestamp
+        #   line2: pid
+        # If pid is gone, treat lock as stale even before ttl.
+        with open(path, "r") as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+        if len(lines) >= 2:
+            try:
+                pid = int(lines[1])
+                os.kill(pid, 0)
+            except (ValueError, ProcessLookupError):
+                return True
+            except PermissionError:
+                # Process exists but belongs to another user; keep lock.
+                pass
+        return False
     except OSError:
         return True
 

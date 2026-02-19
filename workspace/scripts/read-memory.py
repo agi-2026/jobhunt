@@ -19,7 +19,7 @@ import os
 import re
 from datetime import datetime, timedelta
 
-WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 MEMORY_DIR = os.path.join(WORKSPACE, 'memory')
 TRACKER_PATH = os.path.join(WORKSPACE, 'job-tracker.md')
 QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')

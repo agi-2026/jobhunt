@@ -15,12 +15,16 @@ import sys
 import os
 import json
 from datetime import datetime, timezone
+from queue_utils import filter_jobs, read_queue_sections
 
 OPENCLAW_DIR = os.path.expanduser('~/.openclaw')
 JOBS_JSON = os.path.join(OPENCLAW_DIR, 'cron', 'jobs.json')
 WORKSPACE = os.path.join(OPENCLAW_DIR, 'workspace')
 QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')
 TRACKER_PATH = os.path.join(WORKSPACE, 'job-tracker.md')
+ORCH_CYCLE_LOG = os.path.join(WORKSPACE, 'logs', 'orchestrator-cycles.jsonl')
+LOCK_PATH = os.path.join(WORKSPACE, '.queue.lock')
+NO_AUTO_COMPANIES = {'openai', 'databricks', 'pinterest', 'deepmind', 'google deepmind'}
 
 H1B_DEADLINE_MS = int(datetime(2026, 3, 15, tzinfo=timezone.utc).timestamp() * 1000)
 
@@ -67,7 +71,7 @@ def get_agent_health():
         if running_ms and (now_ms - running_ms) > 1800000:  # stuck >30 min
             alerts.append(f"WARNING: {name} appears stuck (running for >{round((now_ms - running_ms)/60000)}m)")
 
-        if last_duration_ms and last_duration_ms > 600000 and name != 'Application Agent':  # >10 min for non-apply
+        if last_duration_ms and last_duration_ms > 600000 and name != 'Application Orchestrator':  # >10 min for non-orchestrator
             alerts.append(f"INFO: {name} took {round(last_duration_ms/1000)}s last run (slow)")
 
     return agents, alerts
@@ -76,25 +80,32 @@ def get_queue_health():
     """Check queue for issues."""
     alerts = []
     try:
-        with open(QUEUE_PATH, 'r') as f:
-            content = f.read()
-
-        import re
-        pending_count = len(re.findall(r'^### \[\d+\]', content, re.MULTILINE))
-        in_progress = content.count('## IN PROGRESS')
+        sections, stats = read_queue_sections(QUEUE_PATH, LOCK_PATH, no_auto_companies=NO_AUTO_COMPANIES)
+        pending_count = len(sections.get('pending', []))
+        in_progress_jobs = len(sections.get('in_progress', []))
+        actionable = filter_jobs(sections.get('pending', []), actionable_only=True)
+        by_ats = {
+            'ashby': len(filter_jobs(sections.get('pending', []), actionable_only=True, ats_filter='ashby')),
+            'greenhouse': len(filter_jobs(sections.get('pending', []), actionable_only=True, ats_filter='greenhouse')),
+            'lever': len(filter_jobs(sections.get('pending', []), actionable_only=True, ats_filter='lever')),
+            'other': len(filter_jobs(sections.get('pending', []), actionable_only=True, ats_filter='other')),
+        }
 
         if pending_count == 0:
             alerts.append("INFO: Job queue is empty — search agent may need attention")
         elif pending_count > 100:
             alerts.append(f"WARNING: Queue has {pending_count} pending jobs — may need compaction")
+        if len(actionable) > 250:
+            alerts.append(f"WARNING: Actionable backlog high ({len(actionable)} jobs)")
+        if in_progress_jobs:
+            alerts.append(f"WARNING: {in_progress_jobs} jobs stuck IN PROGRESS")
 
-        # Check for stale IN PROGRESS
-        ip_section = content.split('## IN PROGRESS')[-1].split('## ')[0] if '## IN PROGRESS' in content else ''
-        ip_jobs = re.findall(r'^### \[\d+\].*$', ip_section, re.MULTILINE)
-        if ip_jobs:
-            alerts.append(f"WARNING: {len(ip_jobs)} jobs stuck IN PROGRESS")
-
-        return {'pending': pending_count, 'in_progress': len(ip_jobs)}, alerts
+        return {
+            'pending': stats.get('pending', pending_count),
+            'in_progress': stats.get('in_progress', in_progress_jobs),
+            'actionable': len(actionable),
+            'by_ats': by_ats,
+        }, alerts
     except Exception as e:
         return {'error': str(e)}, [f"ERROR: Cannot read queue: {e}"]
 
@@ -109,6 +120,8 @@ def get_pipeline_health():
         stages = {}
         for m in re.finditer(r'- \*\*Stage:\*\*\s*(.*)', content):
             stage = m.group(1).strip()
+            if "|" in stage:
+                continue
             stages[stage] = stages.get(stage, 0) + 1
 
         total_applied = sum(v for k, v in stages.items() if k != 'Discovered')
@@ -133,10 +146,28 @@ def get_auth_health():
     try:
         with open(auth_profiles_path, 'r') as f:
             profiles = json.load(f)
-        token = profiles.get('profiles', {}).get('anthropic:default', {}).get('token', '')
+        cred = profiles.get('profiles', {}).get('anthropic:default', {})
+        # Support both "token" type (legacy) and "oauth" type (new)
+        token = cred.get('token', '') or cred.get('access', '')
+        cred_type = cred.get('type', 'token')
         if not token:
             alerts.append("CRITICAL: No Anthropic token configured")
             return {'status': 'missing'}, alerts
+
+        # For OAuth type, check expiry instead of making API call
+        if cred_type == 'oauth':
+            import time
+            expires = cred.get('expires', 0)
+            now = int(time.time() * 1000)
+            if expires > 0 and expires > now:
+                remaining_min = (expires - now) / 60000
+                if remaining_min < 10:
+                    alerts.append(f"WARNING: OAuth token expires in {remaining_min:.0f} min")
+                return {'status': 'valid', 'type': 'oauth', 'expires_in_min': remaining_min}, []
+            elif expires > 0:
+                alerts.append("WARNING: OAuth token expired. Gateway should auto-refresh on next API call.")
+                return {'status': 'near_expiry', 'type': 'oauth'}, alerts
+            return {'status': 'valid', 'type': 'oauth'}, []
 
         ctx = ssl.create_default_context()
         payload = json.dumps({
@@ -173,6 +204,72 @@ def get_auth_health():
         return {'status': 'unknown'}, alerts
 
 
+def get_orchestrator_guardrail_health():
+    """Check orchestrator cycle guardrail freshness."""
+    alerts = []
+    latest = None
+    try:
+        if not os.path.exists(ORCH_CYCLE_LOG):
+            alerts.append("WARNING: Orchestrator guardrail log missing (logs/orchestrator-cycles.jsonl)")
+            return {"status": "missing"}, alerts
+
+        with open(ORCH_CYCLE_LOG, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    latest = line
+
+        if not latest:
+            alerts.append("WARNING: Orchestrator guardrail log is empty")
+            return {"status": "empty"}, alerts
+
+        entry = json.loads(latest)
+        ts_ms = int(entry.get('timestamp_ms', 0) or 0)
+        if ts_ms <= 0:
+            alerts.append("WARNING: Orchestrator guardrail latest entry has invalid timestamp")
+            return {"status": "invalid"}, alerts
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        age_min = (now_ms - ts_ms) / 60000
+        # Also compute last-hour health signal for throughput.
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        one_hour_ago_ms = now_ms - 3600000
+        cycles_1h = 0
+        spawned_1h = 0
+        with open(ORCH_CYCLE_LOG, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = int(e.get('timestamp_ms', 0) or 0)
+                if ts >= one_hour_ago_ms:
+                    cycles_1h += 1
+                    spawned_1h += int(e.get('spawned_count', 0) or 0)
+
+        status = {
+            "status": "fresh" if age_min <= 10 else "stale",
+            "age_min": round(age_min, 1),
+            "spawned_count": entry.get('spawned_count', 0),
+            "statuses": entry.get('statuses', {}),
+            "cycles_1h": cycles_1h,
+            "spawned_1h": spawned_1h,
+        }
+        if age_min > 15:
+            alerts.append(f"CRITICAL: Orchestrator guardrail stale ({age_min:.1f} min old)")
+        elif age_min > 10:
+            alerts.append(f"WARNING: Orchestrator guardrail stale ({age_min:.1f} min old)")
+        if cycles_1h >= 6 and spawned_1h == 0:
+            alerts.append("WARNING: Orchestrator ran in the last hour but spawned 0 subagents")
+        return status, alerts
+    except Exception as e:
+        alerts.append(f"WARNING: Cannot read orchestrator guardrail log: {e}")
+        return {"status": "error"}, alerts
+
+
 def main():
     alert_only = '--alert' in sys.argv
     json_mode = '--json' in sys.argv
@@ -181,8 +278,9 @@ def main():
     queue, queue_alerts = get_queue_health()
     pipeline, pipeline_alerts = get_pipeline_health()
     auth, auth_alerts = get_auth_health()
+    orchestrator_guardrail, orchestrator_alerts = get_orchestrator_guardrail_health()
 
-    all_alerts = auth_alerts + agent_alerts + queue_alerts + pipeline_alerts
+    all_alerts = auth_alerts + orchestrator_alerts + agent_alerts + queue_alerts + pipeline_alerts
 
     # H-1B countdown
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -194,6 +292,7 @@ def main():
         print(json.dumps({
             'timestamp': datetime.now().isoformat(),
             'auth': auth,
+            'orchestrator_guardrail': orchestrator_guardrail,
             'agents': agents,
             'queue': queue,
             'pipeline': pipeline,
@@ -218,6 +317,7 @@ def main():
 
     auth_icon = "OK" if auth.get('status') == 'valid' else "EXPIRED" if auth.get('status') == 'expired' else auth.get('status', '?').upper()
     print(f"AUTH: {auth_icon}\n")
+    print(f"ORCHESTRATOR GUARDRAIL: {orchestrator_guardrail}\n")
 
     print("AGENTS:")
     for a in agents:

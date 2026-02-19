@@ -26,7 +26,17 @@ SKIP_LIST_FILE = WORKSPACE / "skip-companies.json"
 OFFER_DEADLINE = datetime(2026, 3, 6, 12, 0)   # Need offer by this date
 H1B_REG_DEADLINE = datetime(2026, 3, 19, 12, 0) # Final registration deadline
 
-NO_AUTO_COMPANIES = {"openai", "databricks"}
+NO_AUTO_COMPANIES = {"openai", "databricks", "waymo"}
+
+
+def canonicalize_url(url: str) -> str:
+    """Normalize URLs for consistent matching across files."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    u = u.rstrip("/")
+    u = u.replace("/application", "")
+    return u.rstrip("/")
 
 
 def parse_queue(content: str) -> dict:
@@ -188,13 +198,11 @@ def get_applied_jobs() -> list:
     stage_by_url = {}
     date_by_url = {}
     for e in tracker_data["entries"]:
-        url = e.get("link", "").strip()
+        url_raw = e.get("link", "").strip()
+        url = canonicalize_url(url_raw)
         if url:
-            url_base = url.replace("/application", "")
             stage_by_url[url] = normalize_stage(e.get("stage", "Applied"))
-            stage_by_url[url_base] = normalize_stage(e.get("stage", "Applied"))
             date_by_url[url] = e.get("date_applied", "")
-            date_by_url[url_base] = e.get("date_applied", "")
 
     # Parse dedup for all APPLIED entries
     entries = []
@@ -206,27 +214,27 @@ def get_applied_jobs() -> list:
             parts = line.split(" | ")
             if len(parts) < 4:
                 continue
-            url = parts[0].strip()
-            url_base = url.replace("/application", "")
-            if url_base in seen_urls:
+            url_raw = parts[0].strip()
+            url = canonicalize_url(url_raw)
+            if url in seen_urls:
                 continue
-            seen_urls.add(url_base)
+            seen_urls.add(url)
             company = parts[1].strip() if len(parts) > 1 else ""
             title = parts[2].strip() if len(parts) > 2 else ""
             date = (parts[4].strip() if len(parts) > 4 else "") or \
-                   date_by_url.get(url, date_by_url.get(url_base, ""))
-            stage = stage_by_url.get(url, stage_by_url.get(url_base, "Applied"))
+                   date_by_url.get(url, "")
+            stage = stage_by_url.get(url, "Applied")
             entries.append({
-                "url": url, "company": company, "title": title,
+                "url": url_raw, "company": company, "title": title,
                 "date": date, "stage": stage,
             })
 
     # Also include tracker entries not in dedup
     for e in tracker_data["entries"]:
         url = e.get("link", "").strip()
-        url_base = url.replace("/application", "") if url else ""
-        if url and url_base not in seen_urls:
-            seen_urls.add(url_base)
+        url_key = canonicalize_url(url)
+        if url and url_key and url_key not in seen_urls:
+            seen_urls.add(url_key)
             entries.append({
                 "url": url, "company": e["company"], "title": e["title"],
                 "date": e.get("date_applied", ""), "stage": normalize_stage(e.get("stage", "Applied")),
@@ -389,7 +397,68 @@ def mark_as_applied(url: str, company: str = "", title: str = "") -> dict:
     return {"ok": True, "message": f"Marked {company or 'job'} — {title or 'unknown'} as applied"}
 
 
-def update_stage(search_term: str, new_stage: str) -> dict:
+def delete_from_queue(url: str, company: str = "", title: str = "") -> dict:
+    """Delete a job from queue and add to dedup as SKIPPED to prevent re-discovery."""
+    url = url.strip()
+    if not url:
+        return {"ok": False, "error": "URL is required"}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. Add/update dedup-index.md as SKIPPED
+    if DEDUP_FILE.exists():
+        dedup_content = DEDUP_FILE.read_text()
+        url_base = url.replace("/application", "")
+        if url not in dedup_content and url_base not in dedup_content:
+            with open(DEDUP_FILE, "a") as f:
+                f.write(f"{url} | {company or 'Unknown'} | {title or 'Deleted'} | SKIPPED | {today}\n")
+        else:
+            lines = dedup_content.split("\n")
+            updated = False
+            for i, line in enumerate(lines):
+                if (url in line or url_base in line) and "PENDING" in line:
+                    parts = line.split(" | ")
+                    if len(parts) >= 4:
+                        parts[3] = "SKIPPED"
+                    if len(parts) >= 5:
+                        parts[4] = f" {today}"
+                    else:
+                        parts.append(f" {today}")
+                    lines[i] = " | ".join(parts)
+                    updated = True
+            if updated:
+                DEDUP_FILE.write_text("\n".join(lines))
+    else:
+        DEDUP_FILE.write_text(f"# Dedup Index\n{url} | {company or 'Unknown'} | {title or 'Deleted'} | SKIPPED | {today}\n")
+
+    # 2. Remove from pending in job-queue.md
+    if QUEUE_FILE.exists():
+        content = QUEUE_FILE.read_text()
+        lines = content.split("\n")
+        url_variants = [url, url + "/application", url.replace("/application", "")]
+        i = 0
+        removed = False
+        while i < len(lines):
+            if lines[i].startswith("### "):
+                block_start = i
+                block_end = i + 1
+                while block_end < len(lines) and not lines[block_end].startswith("### ") and not lines[block_end].startswith("## "):
+                    block_end += 1
+                block = "\n".join(lines[block_start:block_end])
+                if any(v in block for v in url_variants):
+                    del lines[block_start:block_end]
+                    removed = True
+                    continue
+                i = block_end
+            else:
+                i += 1
+        if removed:
+            QUEUE_FILE.write_text("\n".join(lines))
+
+    return {"ok": True, "message": f"Deleted {company or 'job'} — {title or 'unknown'} (added to dedup as SKIPPED)"}
+
+
+def update_stage(search_term: str, new_stage: str, url: str = "", company: str = "", title: str = "") -> dict:
     """Update a job's stage in the tracker. Searches by company name or URL."""
     valid_stages = ["Applied", "Phone Screen", "Technical Interview",
                     "Take Home", "Onsite/Final", "Offer", "Rejected"]
@@ -402,6 +471,7 @@ def update_stage(search_term: str, new_stage: str) -> dict:
     content = TRACKER_FILE.read_text()
     lines = content.split('\n')
     search_lower = search_term.lower().strip()
+    target_url = canonicalize_url(url or search_term)
 
     # Parse entries with line positions
     entries = []
@@ -414,7 +484,7 @@ def update_stage(search_term: str, new_stage: str) -> dict:
             current = {
                 "company": entry_match.group(1).strip(),
                 "title": entry_match.group(2).strip(),
-                "link": "", "stage_line": None,
+                "link": "", "stage_line": None, "heading_line": i,
             }
             continue
         if current:
@@ -427,14 +497,63 @@ def update_stage(search_term: str, new_stage: str) -> dict:
 
     # Find match by company, title, or URL
     match = None
+    url_matches = []
+    if target_url:
+        for e in entries:
+            if canonicalize_url(e.get("link", "")) == target_url:
+                url_matches.append(e)
+        if url_matches:
+            match = url_matches[0]
     for e in entries:
+        if match:
+            break
         searchable = f"{e['company']} {e['title']} {e['link']}".lower()
         if search_lower in searchable:
             match = e
             break
 
-    if not match or match["stage_line"] is None:
-        return {"ok": False, "error": f"No entry matching '{search_term}'"}
+    if not match:
+        # Dedup-only applied jobs can appear in dashboard without tracker rows yet.
+        # Create a tracker entry so stage updates are always possible from UI.
+        safe_company = (company or "Unknown Company").strip()
+        safe_title = (title or "Unknown Role").strip()
+        safe_url = (url or search_term).strip()
+        today = datetime.now().strftime("%Y-%m-%d")
+        entry = [
+            "",
+            f"### {safe_company} — {safe_title}",
+            f"- **Stage:** {new_stage}",
+            f"- **Date Applied:** {today}",
+            "- **Source:** Dashboard stage update (tracker backfill)",
+            f"- **Link:** {safe_url}",
+        ]
+        TRACKER_FILE.write_text(content.rstrip() + "\n" + "\n".join(entry) + "\n")
+        return {"ok": True, "message": f"{safe_company} — {safe_title}: created tracker entry -> {new_stage}"}
+
+    if url_matches:
+        changed = 0
+        inserted = 0
+        # Update from bottom to top so line inserts don't shift upcoming indexes.
+        for e in sorted(url_matches, key=lambda x: x["heading_line"], reverse=True):
+            if e["stage_line"] is None:
+                insert_at = e["heading_line"] + 1
+                lines.insert(insert_at, f"- **Stage:** {new_stage}")
+                inserted += 1
+            else:
+                lines[e["stage_line"]] = f'- **Stage:** {new_stage}'
+                changed += 1
+        TRACKER_FILE.write_text('\n'.join(lines))
+        label = f"{match['company']} — {match['title']}"
+        details = f"updated {changed}"
+        if inserted:
+            details += f", inserted {inserted}"
+        return {"ok": True, "message": f"{label}: {details} tracker row(s) -> {new_stage}"}
+
+    if match["stage_line"] is None:
+        insert_at = match["heading_line"] + 1
+        lines.insert(insert_at, f"- **Stage:** {new_stage}")
+        TRACKER_FILE.write_text('\n'.join(lines))
+        return {"ok": True, "message": f"{match['company']} — {match['title']}: (missing stage) -> {new_stage}"}
 
     old_stage = lines[match["stage_line"]].split('**Stage:**')[1].strip()
     lines[match["stage_line"]] = f'- **Stage:** {new_stage}'
@@ -674,6 +793,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .url-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .btn-mark { padding: 4px 10px; background: #238636; border: 1px solid #238636; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
   .btn-mark:hover { background: #2ea043; }
+  .btn-delete { padding: 4px 10px; background: #da3633; border: 1px solid #da3633; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; margin-left: 4px; }
+  .btn-delete:hover { background: #f85149; }
   .btn-update { padding: 3px 8px; background: #1f6feb; border: 1px solid #1f6feb; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
   .btn-update:hover { background: #388bfd; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
@@ -778,11 +899,13 @@ function render() {
 
   // Stats
   const p = D.pipeline;
-  const interviews = (p['Phone Screen']||0) + (p['Technical Interview']||0) + (p['Take Home']||0) + (p['Onsite/Final']||0);
+  const interviews = (D.applied || []).filter(j =>
+    ['Phone Screen','Technical Interview','Take Home','Onsite/Final'].includes(j.stage)
+  ).length;
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="value v-yellow">${D.pending.length}</div><div class="label">Queue</div></div>
     <div class="stat"><div class="value v-green">${D.applied_count}</div><div class="label">Applied</div></div>
-    <div class="stat"><div class="value v-purple">${interviews}</div><div class="label">Interviews</div></div>
+    <div class="stat"><div class="value v-purple">${interviews}</div><div class="label">Moved Forward</div></div>
     <div class="stat"><div class="value ${(p['Offer']||0)>0?'v-green':''}">${p['Offer']||0}</div><div class="label">Offers</div></div>
     <div class="stat"><div class="value v-red">${p['Rejected']||0}</div><div class="label">Rejected</div></div>`;
 
@@ -816,7 +939,7 @@ function renderPending() {
       <td>${h(j.location)}</td>
       <td>${h(j.h1b).substring(0,20)}</td>
       <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
-      <td><button class="btn-mark" data-i="${i}" data-t="pending" onclick="markBtn(this)">Mark Applied</button></td>
+      <td style="white-space:nowrap"><button class="btn-mark" data-i="${i}" data-t="pending" onclick="markBtn(this)">Mark Applied</button><button class="btn-delete" data-i="${i}" data-t="pending" onclick="deleteBtn(this)">Delete</button></td>
     </tr>`).join('')}
   </table>`;
 }
@@ -833,7 +956,7 @@ function renderManual() {
       <td>${h(j.title)}</td>
       <td>${h(j.location)}</td>
       <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
-      <td><button class="btn-mark" data-i="${i}" data-t="manual" onclick="markBtn(this)">Mark Applied</button></td>
+      <td style="white-space:nowrap"><button class="btn-mark" data-i="${i}" data-t="manual" onclick="markBtn(this)">Mark Applied</button><button class="btn-delete" data-i="${i}" data-t="manual" onclick="deleteBtn(this)">Delete</button></td>
     </tr>`).join('')}
   </table>`;
 }
@@ -841,6 +964,10 @@ function renderManual() {
 function renderApplied() {
   const el = document.getElementById('p-applied');
   let jobs = D.applied;
+  const activeEl = document.activeElement;
+  const restoreSearchFocus = activeEl && activeEl.id === 'applied-search';
+  const caretStart = restoreSearchFocus ? activeEl.selectionStart : null;
+  const caretEnd = restoreSearchFocus ? activeEl.selectionEnd : null;
 
   if (searchQ) {
     const s = searchQ.toLowerCase();
@@ -852,7 +979,7 @@ function renderApplied() {
 
   el.innerHTML = `
     <div class="filter-bar">
-      <input type="text" placeholder="Search company or title..." value="${h(searchQ)}" oninput="searchQ=this.value;renderApplied()" />
+      <input type="text" id="applied-search" placeholder="Search company or title..." value="${h(searchQ)}" oninput="searchQ=this.value;renderApplied()" />
       <select onchange="stageFilter=this.value;renderApplied()">
         <option value="all" ${stageFilter==='all'?'selected':''}>All Stages</option>
         <option value="Applied" ${stageFilter==='Applied'?'selected':''}>Applied</option>
@@ -883,6 +1010,15 @@ function renderApplied() {
       </td>
     </tr>`).join('')}
     </table>`}`;
+  if (restoreSearchFocus) {
+    const input = document.getElementById('applied-search');
+    if (input) {
+      input.focus();
+      if (caretStart !== null && caretEnd !== null) {
+        input.setSelectionRange(caretStart, caretEnd);
+      }
+    }
+  }
 }
 
 function bc(stage) {
@@ -918,6 +1054,23 @@ async function markBtn(btn) {
   } catch(e) { toast('Error: ' + e.message, 1); }
 }
 
+async function deleteBtn(btn) {
+  const type = btn.dataset.t;
+  const idx = parseInt(btn.dataset.i);
+  const job = type === 'pending' ? D.pending[idx] : D.manual_apply[idx];
+  if (!job) return;
+  if (!confirm('DELETE "' + job.company + ' \u2014 ' + job.title + '"?\n\nThis removes it from the queue and permanently blocks it from being re-added.')) return;
+  try {
+    const r = await fetch('/api/delete-job', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: job.url, company: job.company, title: job.title})
+    });
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error || 'Failed', 1); }
+  } catch(e) { toast('Error: ' + e.message, 1); }
+}
+
 async function updateBtn(btn) {
   const idx = parseInt(btn.dataset.i);
   const sel = document.getElementById('ss-' + idx);
@@ -938,7 +1091,7 @@ async function updateBtn(btn) {
   try {
     const r = await fetch('/api/stage', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({search: searchKey, stage: sel.value})
+      body: JSON.stringify({search: searchKey, stage: sel.value, url: job.url, company: job.company, title: job.title})
     });
     const res = await r.json();
     if (res.ok) { toast(res.message); refresh(); }
@@ -1072,13 +1225,25 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/stage":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = update_stage(body.get("search", ""), body.get("stage", ""))
+            result = update_stage(
+                body.get("search", ""),
+                body.get("stage", ""),
+                body.get("url", ""),
+                body.get("company", ""),
+                body.get("title", ""),
+            )
             self.send_json(result)
 
         elif self.path == "/api/add-job":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
             result = add_job(body.get("url", ""), body.get("destination", "queue"))
+            self.send_json(result)
+
+        elif self.path == "/api/delete-job":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = delete_from_queue(body.get("url", ""), body.get("company", ""), body.get("title", ""))
             self.send_json(result)
 
         elif self.path == "/api/skip-list/add":

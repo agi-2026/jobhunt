@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CHECK_DEDUP = os.path.join(SCRIPT_DIR, 'check-dedup.py')
 ADD_TO_QUEUE = os.path.join(SCRIPT_DIR, 'add-to-queue.py')
 
@@ -54,7 +54,7 @@ COMPANY_INFO = {
     'scaleai': {'info': 'Data/AI platform ($13.8B valuation)', 'score': 90, 'h1b': 'Confirmed'},
     'gleanwork': {'info': 'Work AI ($4.6B valuation)', 'score': 90, 'h1b': 'Likely'},
     'blackforestlabs': {'info': 'Stable Diffusion creators, FLUX', 'score': 80, 'h1b': 'Unknown'},
-    'deepmind': {'info': 'Google DeepMind, top AI lab', 'score': 100, 'h1b': 'Confirmed'},
+    # 'deepmind': REMOVED — Howard reached max application limit
     'recursionpharmaceuticals': {'info': 'AI biotech ($6B mcap)', 'score': 80, 'h1b': 'Likely'},
     # Added 2026-02-16
     'togetherai': {'info': 'Open-source AI, model training/inference ($1.25B)', 'score': 90, 'h1b': 'Likely'},
@@ -98,7 +98,7 @@ COMPANY_INFO = {
     'stripe': {'info': 'Payments/fintech ($65B, AI features)', 'score': 90, 'h1b': 'Confirmed'},
     'dropbox': {'info': 'Cloud storage, Dash AI ($8B mcap)', 'score': 80, 'h1b': 'Confirmed'},
     'pinterest': {'info': 'Visual discovery, AI search ($17B mcap)', 'score': 80, 'h1b': 'Confirmed'},
-    'waymo': {'info': 'Autonomous vehicles (Alphabet)', 'score': 90, 'h1b': 'Confirmed'},
+    # 'waymo': REMOVED — Howard reached max application limit
     'robinhood': {'info': 'Fintech, AI features ($20B+ mcap)', 'score': 80, 'h1b': 'Confirmed'},
     'duolingo': {'info': 'AI language learning ($12B mcap)', 'score': 80, 'h1b': 'Confirmed'},
     'linkedin': {'info': 'Professional network (Microsoft)', 'score': 80, 'h1b': 'Confirmed'},
@@ -130,9 +130,17 @@ def fetch_jobs(slug):
         print(f'ERROR: Network error — {e.reason}')
         sys.exit(1)
 
+EXCLUDE_RE = re.compile(r'\b(intern|internship|contractor|contract|part[\s-]?time)\b', re.IGNORECASE)
+NON_ENG_RE = re.compile(r'\b(product manager|program manager|product designer|ux designer|graphic designer|content writer|copywriter|recruiter|talent acquisition|account executive|sales engineer|customer success|compliance|trust & safety operations|field safety|ehs|hse|clinical research|physician(?! ai)|nurse|facilities manager)\b', re.IGNORECASE)
+
 def is_relevant(job):
     """Check if job title/content matches AI/ML keywords."""
-    text = job.get('title', '')
+    title = job.get('title', '')
+    if EXCLUDE_RE.search(title):
+        return False
+    if NON_ENG_RE.search(title):
+        return False
+    text = title
     # Also check department metadata if available
     for m in (job.get('metadata') or []):
         if m.get('value'):
@@ -265,14 +273,38 @@ def search_company(slug, auto_add):
 
     print(f'FOUND {len(relevant)} relevant US/remote jobs at {company_name} (of {len(all_jobs)} total)')
 
+    if not relevant:
+        return 0, 0
+
+    # Batch score with Gemini for semantic relevance
+    from gemini_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
+    gemini_input = [{'title': j.get('title', ''), 'company': company_name,
+                     'department': next((str(m.get('value', '')) for m in (j.get('metadata') or []) if m.get('name') == 'Department'), '')}
+                    for j in relevant]
+    gemini_scores = batch_score_jobs(gemini_input)
+
     new_count = 0
     dup_count = 0
+    filtered_count = 0
 
-    for job in relevant:
+    for job, gscore in zip(relevant, gemini_scores):
         url = job.get('absolute_url', '')
         title = job.get('title', '')
         location = job.get('location', {}).get('name', 'Unknown')
-        total, breakdown = score_job(job, slug)
+
+        # Filter by Gemini relevance
+        if not gscore['relevant']:
+            filtered_count += 1
+            print(f'  FILTERED [{gscore["score"]}] {company_name} — {title} | {gscore["reason"]}')
+            continue
+
+        # Score using Gemini match score
+        r = recency_score(job)
+        s = 30
+        c = COMPANY_INFO.get(slug, {}).get('score', 70)
+        m = gscore['score']
+        total = r + s + c + m
+        breakdown = f'recency={r} salary={s} company={c} match={m}(gemini:{gscore["reason"]})'
 
         if check_dedup(url):
             dup_count += 1
@@ -294,7 +326,7 @@ def search_company(slug, auto_add):
                 'h1b': info.get('h1b', 'Unknown'),
                 'source': 'Greenhouse API',
                 'scoreBreakdown': breakdown,
-                'whyMatch': f'Relevant AI/ML role at {company_name}',
+                'whyMatch': gscore['reason'],
                 'autoApply': True
             }
             result = add_to_queue(entry)
@@ -302,7 +334,10 @@ def search_company(slug, auto_add):
         else:
             print(f'  [{total}] {company_name} — {title} ({location}) {url}')
 
-    print(f'\nSummary: {new_count} new, {dup_count} duplicate (of {len(relevant)} relevant)')
+    if filtered_count:
+        print(f'  (Gemini filtered {filtered_count} irrelevant jobs)')
+
+    print(f'\nSummary: {new_count} new, {dup_count} duplicate (of {len(relevant)} relevant, {filtered_count} filtered)')
 
     if auto_add:
         try:

@@ -1,6 +1,6 @@
 // greenhouse-verify-code.js — Fill Greenhouse email verification code boxes
-// Run via: browser act kind=evaluate script="<this file>" profile="greenhouse"
-// Pass the 8-character code as: script="(function(){var CODE='ABCD1234'; ... })()"
+// Run via: browser act kind=evaluate fn="<this file>" profile="greenhouse"
+// Pass the 8-character code as: fn="(function(){var CODE='ABCD1234'; ... })()"
 // Or use the wrapper below that reads the code from the page URL hash or a global var.
 //
 // Usage:
