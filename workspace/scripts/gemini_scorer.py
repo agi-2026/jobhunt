@@ -22,7 +22,7 @@ import json
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
-GEMINI_MODEL = 'gemini-3.0-flash'
+GEMINI_MODEL = 'gemini-3-flash-preview'
 
 def _get_api_key():
     """Load Gemini API key from env var, .env file, or interactive prompt."""
