@@ -22,8 +22,33 @@ import json
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
-GEMINI_API_KEY = 'api-key-goes-here'  # <-- REPLACE WITH YOUR API KEY
 GEMINI_MODEL = 'gemini-3.0-flash'
+
+def _get_api_key():
+    """Load Gemini API key from env var, .env file, or interactive prompt."""
+    key = os.environ.get('GEMINI_API_KEY')
+    if key:
+        return key
+    # Try loading from .env file (check workspace/.env and repo root .env)
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    for env_rel in [os.path.join('..', '.env'), os.path.join('..', '..', '.env')]:
+        env_path = os.path.join(script_dir, env_rel)
+        if os.path.exists(env_path):
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('GEMINI_API_KEY='):
+                        key = line.split('=', 1)[1].strip().strip("'\"")
+                        if key:
+                            return key
+    # Interactive prompt as last resort
+    if sys.stdin.isatty():
+        key = input('Enter Gemini API key: ').strip()
+        if key:
+            return key
+    raise RuntimeError('GEMINI_API_KEY not set. Export it or add to workspace/.env')
+
+GEMINI_API_KEY = _get_api_key()
 GEMINI_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}'
 
 # Threshold: jobs scoring below this are filtered out
