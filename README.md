@@ -31,7 +31,7 @@ Static PNG rendering of the architecture for docs/readability. Mermaid source is
 flowchart LR
     OC[OpenClaw Gateway\nCron + Sessions + Browser Service]
     SA[Search Agent\nEvery 2 hours]
-    AO[Application Orchestrator\nEvery 5 min (single spawn)]
+    AO[Application Orchestrator\nEvery 5 min - single spawn]
     HM[Health + Analysis Monitor\nEvery 30 min]
 
     Q[(job-queue.md)]
@@ -101,7 +101,7 @@ flowchart TD
     D --> D1[Ashby API search\nsearch-ashby-api.py --all --add]
     D --> D2[Greenhouse API search\nsearch-greenhouse-api.py --all --add]
     D --> D3[Lever API search\nsearch-lever-api.py --all --add]
-    D --> D4[Brave Search API\n(query fallback)]
+    D --> D4[Brave Search API\nquery fallback]
 
     D1 --> E[Normalize Listings]
     D2 --> E
@@ -120,7 +120,7 @@ flowchart TD
     J --> K[Sorted Pending Queue\njob-queue.md]
     K --> L[Yield Logging + Scheduler Inputs\nlog-yield.py / dynamic-scheduler.py]
 
-    M[Optional Browser Pass\nYC/custom boards only (no LinkedIn)] --> E
+    M[Optional Browser Pass\nYC/custom boards only - no LinkedIn] --> E
 ```
 
 ### Search guarantees
@@ -148,7 +148,7 @@ flowchart TD
 
     subgraph WorkerLifecycle[Single Subagent Lifecycle]
       W1[Acquire global apply lock\nsubagent-lock.py lock apply] --> W2[Read ATS SKILL.md]
-      W2 --> W3[queue-summary --actionable --ats <ats> --top 1]
+      W2 --> W3[queue-summary --actionable --ats ATS_NAME --top 1]
       W3 --> W4[Bind immutable TARGET_URL + preflight]
       W4 -->|dead| W4a[remove-from-queue.py + STOP]
       W4 -->|alive| W5[Navigate with ATS profile]
@@ -165,7 +165,7 @@ flowchart TD
     V2 --> V3[Fill 8-char code via greenhouse-verify-code.js]
 
     LEV --> L1[Lever policy check]
-    L1 -->|disabled (default)| L2[Preflight + defer-manual-apply + STOP]
+    L1 -->|disabled by default| L2[Preflight + defer-manual-apply + STOP]
     L1 -->|enabled| L3[hCaptcha handling path]
 
     HM[Health + Analysis Monitor] --> HX[Detect lock starvation / stuck runs / errors]
