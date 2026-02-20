@@ -9,8 +9,8 @@ Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude So
 
 | Component | Schedule | Role |
 |---|---|---|
-| `Search Agent` | `*/5 * * * *` | API-first discovery across Ashby/Greenhouse/Lever + VC boards + Brave fallback; score + dedup + enqueue |
-| `Application Orchestrator` | `*/1 * * * *` | Deterministic dispatch snapshot + adaptive preflight + parallel ATS subagent fan-out |
+| `Search Agent` | `0 */2 * * *` | API-first discovery across Ashby/Greenhouse/Lever + VC boards + Brave fallback; score + dedup + enqueue |
+| `Application Orchestrator` | `*/5 * * * *` | Deterministic dispatch snapshot + adaptive preflight + parallel ATS subagent fan-out |
 | `Health + Analysis Monitor` | `*/30 * * * *` | Unified health checks, scheduler updates, and analysis digests |
 
 Notes:
@@ -29,8 +29,8 @@ Static PNG rendering of the architecture for docs/readability. Mermaid source is
 ```mermaid
 flowchart LR
     OC[OpenClaw Gateway\nCron + Sessions + Browser Service]
-    SA[Search Agent\nEvery 5 min]
-    AO[Application Orchestrator\nEvery 1 min]
+    SA[Search Agent\nEvery 2 hours]
+    AO[Application Orchestrator\nEvery 5 min]
     HM[Health + Analysis Monitor\nEvery 30 min]
 
     Q[(job-queue.md)]
@@ -93,7 +93,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A[Search Agent Tick\nEvery 5 min] --> B[Load Hot Memory\nread-memory.py hot]
+    A[Search Agent Tick\nEvery 2 hours] --> B[Load Hot Memory\nread-memory.py hot]
     B --> C[Read Rotation + Watchlist]
     C --> D[API Discovery Pass]
 
@@ -133,7 +133,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Application Orchestrator Tick\nEvery 1 min] --> B[Batch Preflight\nbatch-preflight.py --all --remove --top 30 --timeout 90]
+    A[Application Orchestrator Tick\nEvery 5 min] --> B[Batch Preflight\nbatch-preflight.py --all --remove --top 30 --timeout 90]
     A --> D0[Dispatch Snapshot\norchestrator-dispatch.py --json]
     D0 --> B
     B --> C[For ATS in {ashby, greenhouse, lever}]

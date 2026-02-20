@@ -23,6 +23,7 @@ WORKSPACE = os.path.join(OPENCLAW_DIR, 'workspace')
 QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')
 TRACKER_PATH = os.path.join(WORKSPACE, 'job-tracker.md')
 ORCH_CYCLE_LOG = os.path.join(WORKSPACE, 'logs', 'orchestrator-cycles.jsonl')
+SUBAGENT_GUARD_LOG = os.path.join(WORKSPACE, 'logs', 'subagent-guardrails.jsonl')
 LOCK_PATH = os.path.join(WORKSPACE, '.queue.lock')
 NO_AUTO_COMPANIES = {'openai', 'databricks', 'pinterest', 'deepmind', 'google deepmind'}
 
@@ -270,6 +271,66 @@ def get_orchestrator_guardrail_health():
         return {"status": "error"}, alerts
 
 
+def get_subagent_guardrail_health():
+    """Check transcript-derived subagent guardrail violations."""
+    alerts = []
+    try:
+        if not os.path.exists(SUBAGENT_GUARD_LOG):
+            return {"status": "missing", "violations_6h": 0, "latest": {}}, alerts
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        six_hours_ago_ms = now_ms - (6 * 3600 * 1000)
+        recent = []
+        latest = None
+        with open(SUBAGENT_GUARD_LOG, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                latest = entry
+                ts_iso = entry.get("timestamp_iso", "")
+                try:
+                    ts_ms = int(datetime.fromisoformat(ts_iso).timestamp() * 1000)
+                except Exception:
+                    continue
+                if ts_ms >= six_hours_ago_ms:
+                    recent.append(entry)
+
+        by_rule = {}
+        for entry in recent:
+            rule = str(entry.get("rule") or "UNKNOWN")
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+
+        forbidden_gateway = by_rule.get("FORBIDDEN_GATEWAY_COMMAND", 0)
+        non_canonical = (
+            by_rule.get("NON_CANONICAL_FORM_FILLER_PATH", 0)
+            + by_rule.get("NON_CANONICAL_FORM_FILLER_SCRIPT", 0)
+        )
+
+        if forbidden_gateway > 0:
+            alerts.append(
+                f"CRITICAL: {forbidden_gateway} forbidden subagent gateway command(s) in last 6h"
+            )
+        if non_canonical > 0:
+            alerts.append(
+                f"WARNING: {non_canonical} non-canonical form-filler event(s) in last 6h"
+            )
+
+        return {
+            "status": "ok" if not recent else "violations",
+            "violations_6h": len(recent),
+            "by_rule_6h": by_rule,
+            "latest": latest or {},
+        }, alerts
+    except Exception as e:
+        alerts.append(f"WARNING: Cannot read subagent guardrail log: {e}")
+        return {"status": "error"}, alerts
+
+
 def main():
     alert_only = '--alert' in sys.argv
     json_mode = '--json' in sys.argv
@@ -279,8 +340,16 @@ def main():
     pipeline, pipeline_alerts = get_pipeline_health()
     auth, auth_alerts = get_auth_health()
     orchestrator_guardrail, orchestrator_alerts = get_orchestrator_guardrail_health()
+    subagent_guardrail, subagent_guardrail_alerts = get_subagent_guardrail_health()
 
-    all_alerts = auth_alerts + orchestrator_alerts + agent_alerts + queue_alerts + pipeline_alerts
+    all_alerts = (
+        auth_alerts
+        + orchestrator_alerts
+        + subagent_guardrail_alerts
+        + agent_alerts
+        + queue_alerts
+        + pipeline_alerts
+    )
 
     # H-1B countdown
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -293,6 +362,7 @@ def main():
             'timestamp': datetime.now().isoformat(),
             'auth': auth,
             'orchestrator_guardrail': orchestrator_guardrail,
+            'subagent_guardrail': subagent_guardrail,
             'agents': agents,
             'queue': queue,
             'pipeline': pipeline,
@@ -318,6 +388,7 @@ def main():
     auth_icon = "OK" if auth.get('status') == 'valid' else "EXPIRED" if auth.get('status') == 'expired' else auth.get('status', '?').upper()
     print(f"AUTH: {auth_icon}\n")
     print(f"ORCHESTRATOR GUARDRAIL: {orchestrator_guardrail}\n")
+    print(f"SUBAGENT GUARDRAIL: {subagent_guardrail}\n")
 
     print("AGENTS:")
     for a in agents:

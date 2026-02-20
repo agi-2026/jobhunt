@@ -190,6 +190,23 @@ def normalize_stage(stage: str) -> str:
     return STAGE_NORMALIZE.get(stage, stage)
 
 
+def sanitize_applied_date(raw: str) -> str:
+    """Clamp future dates to today; preserve non-date strings."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
+    if not m:
+        return value
+    try:
+        parsed = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+    except ValueError:
+        return value
+    if parsed > datetime.now().date():
+        return datetime.now().strftime("%Y-%m-%d")
+    return value
+
+
 def get_applied_jobs() -> list:
     """Get all applied jobs by merging dedup-index.md with tracker stages."""
     # Build stage/date lookup from tracker
@@ -202,7 +219,7 @@ def get_applied_jobs() -> list:
         url = canonicalize_url(url_raw)
         if url:
             stage_by_url[url] = normalize_stage(e.get("stage", "Applied"))
-            date_by_url[url] = e.get("date_applied", "")
+            date_by_url[url] = sanitize_applied_date(e.get("date_applied", ""))
 
     # Parse dedup for all APPLIED entries
     entries = []
@@ -221,8 +238,7 @@ def get_applied_jobs() -> list:
             seen_urls.add(url)
             company = parts[1].strip() if len(parts) > 1 else ""
             title = parts[2].strip() if len(parts) > 2 else ""
-            date = (parts[4].strip() if len(parts) > 4 else "") or \
-                   date_by_url.get(url, "")
+            date = sanitize_applied_date((parts[4].strip() if len(parts) > 4 else "") or date_by_url.get(url, ""))
             stage = stage_by_url.get(url, "Applied")
             entries.append({
                 "url": url_raw, "company": company, "title": title,
@@ -237,7 +253,7 @@ def get_applied_jobs() -> list:
             seen_urls.add(url_key)
             entries.append({
                 "url": url, "company": e["company"], "title": e["title"],
-                "date": e.get("date_applied", ""), "stage": normalize_stage(e.get("stage", "Applied")),
+                "date": sanitize_applied_date(e.get("date_applied", "")), "stage": normalize_stage(e.get("stage", "Applied")),
             })
 
     entries.sort(key=lambda x: x.get("date", ""), reverse=True)

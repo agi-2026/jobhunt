@@ -26,6 +26,8 @@ LOCK_PATH = os.path.join(WORKSPACE, ".queue.lock")
 SCRIPTS_DIR = os.path.dirname(os.path.realpath(__file__))
 ATS_TYPES = ["ashby", "greenhouse", "lever"]
 NO_AUTO_COMPANIES = {"openai", "databricks", "pinterest", "deepmind", "google deepmind"}
+LEVER_SKILL_PATH = os.path.join(WORKSPACE, "skills", "apply-lever", "SKILL.md")
+LEVER_ENABLE_ENV = "OPENCLAW_ENABLE_LEVER"
 
 
 def check_lock(ats: str) -> dict:
@@ -64,10 +66,26 @@ def adaptive_settings(total_actionable: int) -> dict:
     }
 
 
+def lever_automation_enabled() -> bool:
+    env = (os.environ.get(LEVER_ENABLE_ENV) or "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    try:
+        with open(LEVER_SKILL_PATH, "r", encoding="utf-8", errors="ignore") as f:
+            header = f.read(1200)
+        return "## STATUS: DISABLED" not in header
+    except OSError:
+        # Fail safe: if we cannot read policy, do not disable lever implicitly.
+        return True
+
+
 def build_dispatch() -> dict:
     sections, stats = read_queue_sections(QUEUE_PATH, LOCK_PATH, no_auto_companies=NO_AUTO_COMPANIES)
     pending = sections.get("pending", [])
     actionable = filter_jobs(pending, actionable_only=True, ats_filter=None)
+    lever_enabled = lever_automation_enabled()
     by_ats = {
         ats: sorted(
             filter_jobs(pending, actionable_only=True, ats_filter=ats),
@@ -82,6 +100,9 @@ def build_dispatch() -> dict:
     for ats in ATS_TYPES:
         lock_info = check_lock(ats)
         jobs = by_ats[ats]
+        if ats == "lever" and not lever_enabled:
+            jobs = []
+            lock_info = {"locked": True, "raw": "LOCKED disabled-by-policy"}
         top_job = jobs[0] if jobs else None
         if lock_info["locked"]:
             status = "SKIPPED_LOCKED"
@@ -150,4 +171,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

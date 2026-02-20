@@ -11,6 +11,23 @@ All Lever forms now include invisible hCaptcha verification. Headless Chrome can
 ## Browser Profile
 Always use `profile="lever"` for ALL browser actions (snapshot, navigate, act, upload).
 
+## Single-Job Guardrail (CRITICAL)
+- Work exactly **ONE URL per subagent run**.
+- After selecting the top queued Lever URL, do not open any other job URL in this run.
+- Stay on that job until one terminal outcome: `SUBMITTED`, `SKIPPED`, or `DEFERRED`.
+- If terminal outcome is reached, stop the run and unlock.
+- Do not start a second application in the same subagent run.
+
+## Disabled Mode Enforcement (CRITICAL, OVERRIDES PHASES BELOW)
+Lever auto-apply is disabled because hCaptcha blocks reliable automation.
+
+For each Lever subagent run, after choosing the single top URL:
+1. `exec: python3 scripts/preflight-check.py "<url>"`
+2. If `DEAD`: `exec: python3 scripts/remove-from-queue.py "<url>"`, set terminal outcome `SKIPPED`, and STOP.
+3. If `ALIVE`: `exec: python3 scripts/defer-manual-apply.py "<url>" "<Company>" "<Title>" "lever" --reason "Lever automation disabled (hCaptcha)"`, set terminal outcome `DEFERRED`, and STOP.
+4. Do **NOT** navigate to the Lever page in disabled mode.
+5. Always unlock at the end per the subagent FINALLY rule.
+
 ## Queue Selection
 ```
 exec: python3 scripts/queue-summary.py --actionable --ats lever --top 10 --full-url
@@ -24,7 +41,7 @@ Do NOT read `job-queue.md` for URL lookup.
 ```
 exec: python3 scripts/preflight-check.py "<url>"
 ```
-If `DEAD`: remove with `exec: python3 scripts/remove-from-queue.py "<url>"` and pick next job.
+If `DEAD`: remove with `exec: python3 scripts/remove-from-queue.py "<url>"`, set terminal outcome `SKIPPED`, and STOP this run. Do not pick another URL.
 
 ### Phase 0.5: Connection Search (score >= 280)
 ```
@@ -35,7 +52,7 @@ exec: python3 scripts/search-connections.py "<Company Name>"
 - `browser navigate <url> profile="lever"`
 - Wait 3s. Take snapshot.
 - Handle cookie consent popups.
-- If 404 / expired: skip, remove from queue.
+- If 404 / expired: skip, remove from queue, set terminal outcome `SKIPPED`, and STOP this run.
 
 ### Phase 2: Fill Form
 Copy resume first:
@@ -43,6 +60,10 @@ Copy resume first:
 exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
 ```
 Read `skills/apply-lever/scripts/form-filler.js` and run via `browser act kind=evaluate script="..." timeoutMs=30000 profile="lever"`.
+When running evaluate:
+- Paste the **entire file contents** exactly (starts with `(function() {`).
+- Do **NOT** run `formFiller()` or any symbol-only snippet.
+- If error contains `formFiller is not defined`, re-read the file and re-run once with full file contents.
 Parse the returned JSON.
 
 **Lever uses native HTML forms** — no React comboboxes, no toggle buttons. The form-filler handles everything via JS. No Playwright interaction needed for dropdowns (native `<select>` elements).
@@ -72,10 +93,13 @@ Check the returned JSON: if `verified: false` or errors mention validation, take
 
 ### Phase 4: Custom Questions
 If `customQuestions[]` is non-empty:
-- Read `SOUL.md` for voice/tone
-- For "Additional Info" textarea on high-score jobs (280+): write 2-3 sentence cover letter mentioning company fit
-- For other jobs: brief relevant note or "See resume"
-- Run `skills/apply-lever/scripts/fill-custom-answers.js` via evaluate
+- Generate concise, truthful answers from resume/profile context. Do not invent specific facts.
+- Build `window.__CUSTOM_ANSWERS__` as an array of `{ selector, value, type }` using entries from `customQuestions[]`.
+- Set answers payload:
+  `browser act kind=evaluate script="window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>" profile="lever"`
+- Read `skills/apply-lever/scripts/fill-custom-answers.js` and run it via:
+  `browser act kind=evaluate script="..." timeoutMs=30000 profile="lever"`
+- If required custom-question validation still fails after up to 2 correction attempts, set terminal outcome `DEFERRED`.
 
 ### Phase 5: Submit
 - Take fresh snapshot. Verify all required fields filled.
@@ -105,9 +129,10 @@ Alternatively, if the post-submit snapshot shows an image grid overlay with a pr
    - If confirmation page → SUCCESS, proceed to Phase 6.
    - If new hCaptcha round → repeat from step 1 (max 5 rounds total).
    - If "Please try again" error → retry the same round.
-6. If still challenged after 5 rounds, do NOT remove the job from queue.
-   - Leave it as pending for future retry cycles.
-   - Continue to the next Lever URL in this run.
+6. If still challenged after 5 rounds, defer to manual apply and stop this run:
+   - `exec: python3 scripts/defer-manual-apply.py "<url>" "<Company>" "<Title>" "lever" --reason "hCaptcha unsolved after 5 rounds"`
+   - Set terminal outcome `DEFERRED`.
+   - Do not open another URL.
 
 **Tips for accurate solving:**
 - Look at EACH image carefully — some images may be ambiguous.
@@ -130,7 +155,12 @@ Append to `job-tracker.md`:
 - **Follow-up Due:** YYYY-MM-DD (5 days from now)
 ```
 
-**LOOP:** Pick next Lever job. Continue until timeout (max 5 per cycle).
+Do not loop to another job in this run. End after this single job reaches terminal outcome.
+
+### Submission Integrity Rule (CRITICAL)
+- Only run `mark-applied.py` when submit confirmation is clearly visible.
+- If confirmation is missing/ambiguous, do NOT mark applied.
+- Set `DEFERRED` and stop this run.
 
 ### Phase 7: Session Memory
 Before timeout, append 3-line summary to `memory/session-YYYY-MM-DD.md`.
@@ -157,7 +187,9 @@ Lever forms can cause browser refs to go stale on large pages. Strategy:
 - **Narrow selectors:** Never use broad selectors like `button, [class*=code]`. Always scope to a specific section.
 
 ## Skip Rules
-- CAPTCHA: Attempt to solve via vision (Phase 5.5). If unsolved after 5 rounds, keep pending and continue to another job.
+- CAPTCHA: Attempt to solve via vision (Phase 5.5). If unsolved after 5 rounds, defer to manual apply and end the run.
 - 3 failed retries: SKIP with reason
 - Non-US locations: SKIP (verify location before applying)
 - Check `skip-companies.json` — companies listed there must be SKIPPED
+
+On SKIP/DEFER for this job, stop the run. Do not open another URL.

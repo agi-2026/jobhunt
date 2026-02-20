@@ -30,8 +30,14 @@ workspace/job-queue-archive.md
 workspace/job-tracker.md
 workspace/dedup-index.md
 workspace/manual-dedup.md
+workspace/manual-apply-required.md
 workspace/yield-log.json
 yield-log.json
+search-rotation.md
+workspace/config/
+workspace/logs/*
+workspace/logs/.*
+!workspace/logs/.gitkeep
 workspace/memory/
 !workspace/memory/.gitkeep
 workspace/analysis/

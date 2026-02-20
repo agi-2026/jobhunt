@@ -32,6 +32,23 @@ def read_file(path):
     with open(path, "r") as f:
         return f.read()
 
+def normalize_applied_date(value):
+    """Normalize dates to YYYY-MM-DD and clamp future dates to today."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})\b", raw)
+    if not m:
+        return raw
+    try:
+        parsed = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+    except ValueError:
+        return raw
+    today = datetime.now().date()
+    if parsed > today:
+        return today.isoformat()
+    return m.group(1)
+
 def extract_from_tracker(content):
     """Extract entries from job-tracker.md format:
     ### [Company] — [Title]
@@ -71,7 +88,7 @@ def extract_from_tracker(content):
         # Match date
         m = re.match(r"^- \*\*Date Applied:\*\*\s*(.+)$", line)
         if m:
-            current_date = m.group(1).strip()
+            current_date = normalize_applied_date(m.group(1))
             continue
 
     # Save last entry
@@ -200,7 +217,7 @@ def main():
         company = data["company"].replace("|", "/")
         title = data["title"].replace("|", "/")
         status = data["status"]
-        date = data["date"]
+        date = normalize_applied_date(data["date"])
         lines.append(f"{url} | {company} | {title} | {status} | {date}")
 
     output = "\n".join(lines) + "\n"

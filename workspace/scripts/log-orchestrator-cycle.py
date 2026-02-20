@@ -23,7 +23,20 @@ WORKSPACE = os.path.expanduser("~/.openclaw/workspace")
 LOG_DIR = os.path.join(WORKSPACE, "logs")
 LOG_PATH = os.path.join(LOG_DIR, "orchestrator-cycles.jsonl")
 LOCK_PATH = os.path.join(LOG_DIR, ".orchestrator-cycles.lock")
-VALID_STATUS = {"SPAWNED", "SKIPPED_LOCKED", "SKIPPED_EMPTY", "ERROR", "UNKNOWN"}
+VALID_STATUS = {
+    "SPAWNED",
+    "SKIPPED_LOCKED",
+    "SKIPPED_EMPTY",
+    "SKIPPED_NOT_CHOSEN",
+    "ERROR",
+    "UNKNOWN",
+}
+
+# Backward-compatible aliases used in older orchestrator prompts.
+STATUS_ALIAS = {
+    "SKIPPED_NOT_HIGHEST": "SKIPPED_NOT_CHOSEN",
+    "SKIPPED_MODE": "UNKNOWN",
+}
 
 
 def _ensure_paths() -> None:
@@ -87,6 +100,7 @@ def check_fresh(max_age_min: int) -> int:
 
 def normalize_status(raw: str) -> str:
     v = (raw or "").strip().upper()
+    v = STATUS_ALIAS.get(v, v)
     if v not in VALID_STATUS:
         raise ValueError(f"Invalid status '{raw}'. Valid: {', '.join(sorted(VALID_STATUS))}")
     return v
@@ -144,4 +158,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

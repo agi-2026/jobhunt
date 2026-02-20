@@ -9,7 +9,7 @@
       "enabled": true,
       "schedule": {
         "kind": "cron",
-        "expr": "*/5 * * * *",
+        "expr": "0 */2 * * *",
         "tz": "America/Chicago"
       },
       "sessionTarget": "isolated",

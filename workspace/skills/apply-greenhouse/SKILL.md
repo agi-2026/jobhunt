@@ -8,6 +8,13 @@ description: Greenhouse ATS application agent. Handles MyGreenhouse autofill, Re
 ## Browser Profile
 Always use `profile="greenhouse"` for ALL browser actions (snapshot, navigate, act, upload).
 
+## Single-Job Guardrail (CRITICAL)
+- Work exactly **ONE URL per subagent run**.
+- After selecting the top queued Greenhouse URL, do not open any other job URL in this run.
+- Stay on that job until one terminal outcome: `SUBMITTED`, `SKIPPED`, or `DEFERRED`.
+- If terminal outcome is reached, stop the run and unlock.
+- Do not start a second application in the same subagent run.
+
 ## Queue Selection
 ```
 exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 10 --full-url
@@ -21,7 +28,7 @@ Do NOT read `job-queue.md` for URL lookup.
 ```
 exec: python3 scripts/preflight-check.py "<url>"
 ```
-If `DEAD`: remove with `exec: python3 scripts/remove-from-queue.py "<url>"` and pick next job.
+If `DEAD`: remove with `exec: python3 scripts/remove-from-queue.py "<url>"`, set terminal outcome `SKIPPED`, and STOP this run. Do not pick another URL.
 
 ### Phase 0.5: Connection Search (score >= 280)
 ```
@@ -32,6 +39,7 @@ exec: python3 scripts/search-connections.py "<Company Name>"
 - `browser navigate <url> profile="greenhouse"`
 - Wait 5s. Take snapshot.
 - Handle cookie/privacy popups.
+- If page is 404 / expired: remove from queue, set terminal outcome `SKIPPED`, and STOP this run.
 - If iframe (company career page wrapping `boards.greenhouse.io`): navigate to the direct Greenhouse URL.
 
 ### Phase 1.5: MyGreenhouse Autofill
@@ -50,6 +58,10 @@ Copy resume first:
 exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
 ```
 Read `skills/apply-greenhouse/scripts/form-filler.js` and run via `browser act kind=evaluate script="..." timeoutMs=30000 profile="greenhouse"`.
+When running evaluate:
+- Paste the **entire file contents** exactly (starts with `(function() {`).
+- Do **NOT** run `formFiller()` or any symbol-only snippet.
+- If error contains `formFiller is not defined`, re-read the file and re-run once with full file contents.
 Parse the returned JSON.
 
 ### Phase 3: Combobox Dropdowns (CRITICAL for Greenhouse)
@@ -88,13 +100,17 @@ Check the returned JSON: if `verified: false` or errors mention validation, take
 
 If "file already uploaded" in skipped results: skip upload entirely.
 **NEVER click the Attach button with a regular click** — always use the upload action.
+Never upload by typing a file path into a button/text input. Use `kind=upload` only.
 
 ### Phase 5: Custom Questions
 If `customQuestions[]` is non-empty:
-- Read `SOUL.md` for voice/tone
-- For essays (200+ words): use `sessions_spawn` with Opus
-- For short answers: fill inline
-- Run `skills/apply-greenhouse/scripts/fill-custom-answers.js` via evaluate
+- Generate concise, truthful answers from resume/profile context. Do not invent specific facts.
+- Build `window.__CUSTOM_ANSWERS__` as an array of `{ selector, value, type }` using entries from `customQuestions[]`.
+- Set answers payload:
+  `browser act kind=evaluate script="window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>" profile="greenhouse"`
+- Read `skills/apply-greenhouse/scripts/fill-custom-answers.js` and run it via:
+  `browser act kind=evaluate script="..." timeoutMs=30000 profile="greenhouse"`
+- If required custom-question validation still fails after up to 2 correction attempts, set terminal outcome `DEFERRED`.
 
 ### Phase 6: Submit
 - Take fresh snapshot. Verify all required fields are filled (check for red outlines / error messages).
@@ -118,6 +134,11 @@ After submit, if "verification code" or "security code" text appears:
 6. Verify "Thank you for applying" confirmation page
 7. If no email after 30s: retry search once. Still nothing: WhatsApp Howard, mark SKIPPED.
 
+### Submission Integrity Rule (CRITICAL)
+- Only run `mark-applied.py` after final success confirmation is visible (for Greenhouse typically "Thank you for applying" after verification).
+- If confirmation is absent, do NOT mark applied.
+- If ambiguous after retries, set `DEFERRED` and stop.
+
 **CRITICAL:** The verification code boxes are at the BOTTOM of the page near the submit area. Do NOT type into any form fields at the top of the page. The code inputs are small single-character boxes (maxlength=1) grouped together.
 
 ### Phase 7: Post-Submit
@@ -135,7 +156,7 @@ Append to `job-tracker.md`:
 - **Follow-up Due:** YYYY-MM-DD (5 days from now)
 ```
 
-**LOOP:** Pick next Greenhouse job. Continue until timeout (max 5 per cycle).
+Do not loop to another job in this run. End after this single job reaches terminal outcome.
 
 ### Phase 8: Session Memory
 Before timeout, append 3-line summary to `memory/session-YYYY-MM-DD.md`.
@@ -155,9 +176,12 @@ Before timeout, append 3-line summary to `memory/session-YYYY-MM-DD.md`.
   - Small `input[maxlength="1"]` elements near that text
   - Or use the atomic `greenhouse-verify-code.js` script which handles this correctly
 - **Stale refs:** After any page change, navigation, or long delay, take a fresh snapshot before clicking elements. Old ref IDs (e.g. "e9", "e18") become invalid.
+- On stale-ref errors (`Unknown ref`, `not found`, `not visible`): take fresh snapshot and retry the SAME action once; do not switch jobs/pages.
 
 ## Skip Rules
 - Databricks: cross-origin iframe cannot be automated → SKIP
 - CAPTCHA: SKIP + WhatsApp Howard
 - 3 failed retries: SKIP with reason
 - Check `skip-companies.json` — companies listed there must be SKIPPED
+
+On SKIP/DEFER for this job, stop the run. Do not open another URL.

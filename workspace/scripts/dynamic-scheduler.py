@@ -11,11 +11,8 @@ Usage:
   python3 scripts/dynamic-scheduler.py --status     # Show current yield stats
 
 Logic:
-  - High yield (5+ new/run avg over last hour) → every 3 min
-  - Normal yield (1-4 new/run avg) → every 5 min (default)
-  - Low yield (0 new for 3+ consecutive runs) → every 10 min
-  - Zero yield (0 new for 6+ consecutive runs) → every 15 min
-  - Night hours (11PM-7AM CT) → every 30 min regardless
+  - Search Agent is hard-throttled to every 2 hours (apply-priority mode).
+  - Application Agent remains adaptive based on pending queue depth.
 
 The scheduler also adjusts the Application Agent:
   - If queue has 10+ PENDING jobs → every 2 min
@@ -37,13 +34,9 @@ QUEUE_PATH = os.path.join(WORKSPACE, 'job-queue.md')
 SEARCH_AGENT_NAME = 'Search Agent'
 APP_AGENT_NAME = 'Application Agent'
 
-# Schedule tiers for Search Agent
+# Search Agent is intentionally hard-throttled so apply lanes are not starved.
 SEARCH_SCHEDULES = {
-    'high':    {'expr': '*/3 * * * *',  'label': 'every 3 min (high yield)'},
-    'normal':  {'expr': '*/5 * * * *',  'label': 'every 5 min (normal)'},
-    'low':     {'expr': '*/10 * * * *', 'label': 'every 10 min (low yield)'},
-    'idle':    {'expr': '*/15 * * * *', 'label': 'every 15 min (idle)'},
-    'night':   {'expr': '*/30 * * * *', 'label': 'every 30 min (night)'},
+    'throttled': {'expr': '0 */2 * * *', 'label': 'every 2 hours (apply-priority guardrail)'},
 }
 
 # Schedule tiers for Application Agent
@@ -74,39 +67,7 @@ def get_recent_yields(entries, hours=1):
 
 def compute_search_tier():
     """Determine the appropriate search schedule tier."""
-    now = datetime.now()
-    hour = now.hour
-
-    # Night mode: 11PM-7AM CT
-    if hour >= 23 or hour < 7:
-        return 'night', 'Night hours (11PM-7AM)'
-
-    entries = load_yield_log()
-    recent = get_recent_yields(entries, hours=1)
-
-    if not recent:
-        return 'normal', 'No recent yield data — using default'
-
-    # Calculate stats
-    total_new = sum(e.get('new_count', 0) for e in recent)
-    avg_per_run = total_new / len(recent) if recent else 0
-
-    # Count consecutive zero-yield runs (most recent first)
-    consecutive_zeros = 0
-    for e in reversed(entries):
-        if e.get('new_count', 0) == 0:
-            consecutive_zeros += 1
-        else:
-            break
-
-    if avg_per_run >= 5:
-        return 'high', f'High yield: {avg_per_run:.1f} avg new/run ({len(recent)} runs in last hour)'
-    elif consecutive_zeros >= 6:
-        return 'idle', f'Idle: {consecutive_zeros} consecutive zero-yield runs'
-    elif consecutive_zeros >= 3:
-        return 'low', f'Low yield: {consecutive_zeros} consecutive zeros'
-    else:
-        return 'normal', f'Normal: {avg_per_run:.1f} avg new/run'
+    return 'throttled', 'Apply-priority mode: search fixed at every 2 hours'
 
 
 def get_pending_count():
