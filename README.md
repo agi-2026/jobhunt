@@ -3,20 +3,21 @@
 JobHunt is an OpenClaw-powered autonomous system for continuous job discovery and application.  
 It runs a producer/consumer pipeline with ATS-partitioned browser workers, queue safety locks, and orchestration that can operate continuously in the background.
 
-Built on [OpenClaw](https://github.com/nichochar/openclaw), powered by Claude Sonnet 4.6.
+Built on [OpenClaw](https://github.com/nichochar/openclaw), with model routing configurable per agent.
 
 ## Current Runtime (Feb 2026)
 
 | Component | Schedule | Role |
 |---|---|---|
 | `Search Agent` | `0 */2 * * *` | API-first discovery across Ashby/Greenhouse/Lever + VC boards + Brave fallback; score + dedup + enqueue |
-| `Application Orchestrator` | `*/5 * * * *` | Deterministic dispatch snapshot + adaptive preflight + parallel ATS subagent fan-out |
+| `Application Orchestrator` | `*/5 * * * *` | Deterministic dispatch snapshot + adaptive preflight + true global-top ATS pick + single subagent spawn |
 | `Health + Analysis Monitor` | `*/30 * * * *` | Unified health checks, scheduler updates, and analysis digests |
 
 Notes:
 - The old monolithic `Application Agent` has been replaced by `Application Orchestrator`.
 - `Email Monitor` cron job has been removed.
 - Greenhouse verification codes are fetched on-demand via `gog gmail search` in the Greenhouse application flow.
+- Current default model mix: orchestrator/subagents via OpenRouter (`moonshotai/kimi-k2.5:nitro`), search/health via Gemini Flash preview.
 
 ---
 
@@ -30,7 +31,7 @@ Static PNG rendering of the architecture for docs/readability. Mermaid source is
 flowchart LR
     OC[OpenClaw Gateway\nCron + Sessions + Browser Service]
     SA[Search Agent\nEvery 2 hours]
-    AO[Application Orchestrator\nEvery 5 min]
+    AO[Application Orchestrator\nEvery 5 min (single spawn)]
     HM[Health + Analysis Monitor\nEvery 30 min]
 
     Q[(job-queue.md)]
@@ -98,7 +99,7 @@ flowchart TD
     C --> D[API Discovery Pass]
 
     D --> D1[Ashby API search\nsearch-ashby-api.py --all --add]
-    D --> D2[Greenhouse API search\nsearch-greenhouse-api.py <slug> --add]
+    D --> D2[Greenhouse API search\nsearch-greenhouse-api.py --all --add]
     D --> D3[Lever API search\nsearch-lever-api.py --all --add]
     D --> D4[Brave Search API\n(query fallback)]
 
@@ -119,7 +120,7 @@ flowchart TD
     J --> K[Sorted Pending Queue\njob-queue.md]
     K --> L[Yield Logging + Scheduler Inputs\nlog-yield.py / dynamic-scheduler.py]
 
-    M[Optional Browser Pass\nLinkedIn/YC/custom boards] --> E
+    M[Optional Browser Pass\nYC/custom boards only (no LinkedIn)] --> E
 ```
 
 ### Search guarantees
@@ -133,58 +134,50 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Application Orchestrator Tick\nEvery 5 min] --> B[Batch Preflight\nbatch-preflight.py --all --remove --top 30 --timeout 90]
-    A --> D0[Dispatch Snapshot\norchestrator-dispatch.py --json]
-    D0 --> B
-    B --> C[For ATS in {ashby, greenhouse, lever}]
+    A[Application Orchestrator Tick\nEvery 5 min] --> B[Batch Preflight\nbatch-preflight.py --all --remove --top 12 --timeout 90]
+    B --> C[Check global apply lock\nsubagent-lock.py check apply]
+    C -->|LOCKED| C1[Stop cycle]
+    C -->|UNLOCKED| D[Dispatch Snapshot\norchestrator-dispatch.py --json]
+    D --> E[Choose READY ATS with highest top_score\nTie: ashby > greenhouse > lever]
+    E -->|none READY| E1[Stop cycle]
+    E -->|chosen ATS| F[Spawn exactly ONE subagent\nsessions_spawn]
 
-    C --> D[Check lock\nsubagent-lock.py check <ats>]
-    D -->|LOCKED| D1[Skip ATS this cycle]
-    D -->|UNLOCKED| E[Check actionable queue\nqueue-summary.py --actionable --ats <ats> --top 1]
-    E -->|empty| E1[Skip ATS this cycle]
-    E -->|has work| F[Mark ATS READY]
+    F --> ASH[Ashby Subagent]
+    F --> GH[Greenhouse Subagent]
+    F --> LEV[Lever Subagent]
 
-    F --> G[Fan-out spawn via sessions_spawn\nall READY ATS in same orchestrator run]
-
-    G --> ASH[Ashby Subagent]
-    G --> GH[Greenhouse Subagent]
-    G --> LEV[Lever Subagent]
-
-    subgraph WorkerLifecycle[Per-ATS Subagent Lifecycle]
-      W1[Acquire ATS lock\nsubagent-lock.py lock <ats>] --> W2[Read ATS SKILL.md]
-      W2 --> W3[Pull top actionable ATS job]
-      W3 --> W4[URL preflight-check.py]
-      W4 -->|dead| W4a[remove-from-queue.py]
-      W4 -->|alive| W5[Navigate in dedicated browser profile]
-      W5 --> W6[Run ATS form-filler.js]
-      W6 --> W7[Handle ATS-specific controls\ncombobox/toggle/ref refresh/upload verify]
-      W7 --> W8[Handle custom Qs / essays]
-      W8 --> W9[Submit]
-      W9 --> W10[Post-submit verify]
-      W10 -->|success| W11[mark-applied.py + tracker append]
-      W10 -->|CAPTCHA or repeated failure| W12[Keep pending for retry/defer]
-      W11 --> W13[Next job (up to per-run cap)]
-      W12 --> W13
-      W13 --> W14[Unlock ATS lock\nsubagent-lock.py unlock <ats>]
+    subgraph WorkerLifecycle[Single Subagent Lifecycle]
+      W1[Acquire global apply lock\nsubagent-lock.py lock apply] --> W2[Read ATS SKILL.md]
+      W2 --> W3[queue-summary --actionable --ats <ats> --top 1]
+      W3 --> W4[Bind immutable TARGET_URL + preflight]
+      W4 -->|dead| W4a[remove-from-queue.py + STOP]
+      W4 -->|alive| W5[Navigate with ATS profile]
+      W5 --> W6[Run canonical ATS form-filler.js\nHandle combobox/toggle/upload/custom Qs]
+      W6 --> W7[Submit + post-submit verification]
+      W7 -->|success| W8[mark-applied.py + tracker append]
+      W7 -->|blocked/ambiguous| W9[SKIPPED or DEFERRED]
+      W8 --> W10[Unlock apply lock + STOP]
+      W9 --> W10
     end
 
     GH --> V1[Greenhouse email verification path]
     V1 --> V2[gog gmail search from:greenhouse subject:security code]
     V2 --> V3[Fill 8-char code via greenhouse-verify-code.js]
 
-    LEV --> L1[hCaptcha path]
-    L1 --> L2[Try bounded rounds]
-    L2 -->|still blocked| L3[Defer in queue + continue]
+    LEV --> L1[Lever policy check]
+    L1 -->|disabled (default)| L2[Preflight + defer-manual-apply + STOP]
+    L1 -->|enabled| L3[hCaptcha handling path]
 
     HM[Health + Analysis Monitor] --> HX[Detect lock starvation / stuck runs / errors]
     HX --> WA[WhatsApp alerts]
 ```
 
 ### Application guarantees
-- ATS partitioning prevents cross-worker collisions.
-- Locking prevents duplicate subagents for the same ATS.
-- Shared `.queue.lock` plus atomic scripts prevent queue corruption.
-- CAPTCHA-blocked jobs are deferred (not dropped), so they can retry in later cycles.
+- Orchestrator spawns exactly one subagent per cycle based on true global-top score.
+- Each subagent is single-job: one immutable `TARGET_URL`, one terminal outcome, then stop.
+- Global apply lock and queue lock prevent concurrent double-apply and queue corruption.
+- Canonical ATS form-filler paths are enforced to avoid ad-hoc filler drift.
+- CAPTCHA/blocked jobs are skipped or deferred instead of being marked applied.
 
 ---
 
@@ -192,13 +185,13 @@ flowchart TD
 
 | Risk | Current Mitigation |
 |---|---|
-| Duplicate subagent spawn | `subagent-lock.py` per ATS (`ashby`, `greenhouse`, `lever`) |
+| Duplicate subagent spawn | Global apply lock (`subagent-lock.py lock apply`) + deterministic single-spawn orchestrator policy |
 | Zombie lock file | Stale lock expiration + PID liveness validation |
 | Queue read/write races | Shared `.queue.lock` (`LOCK_SH` for reads, `LOCK_EX` for writes) |
 | Dead links blocking queue head | `batch-preflight.py --remove` + per-job preflight checks |
-| CAPTCHA loops preventing drain | Bounded retries + defer/keep-pending policy in ATS skills |
-| Cron lane serialization | `sessions_spawn` fan-out to subagent lane |
-| Silent orchestrator drift | Per-cycle guardrail logs (`logs/orchestrator-cycles.jsonl`) + freshness checks |
+| CAPTCHA loops preventing drain | Lever disabled-by-policy default + defer-manual path; ATS skills use bounded retries |
+| Cron contention | Single subagent spawn per cycle + `sessions_spawn` isolation |
+| Silent orchestrator drift | Guardrail logs (`logs/orchestrator-cycles.jsonl`, `logs/subagent-guardrails.jsonl`) + freshness checks |
 | Parser divergence across scripts | Shared queue parser module (`scripts/queue_utils.py`) |
 
 ---
@@ -217,7 +210,7 @@ flowchart TD
 |---|---|---|---|
 | Ashby | API | Automated | Toggle-heavy forms handled by ATS skill |
 | Greenhouse | API | Automated | Email verification code handled via `gog gmail search` |
-| Lever | API | Automated with retry/defer | hCaptcha can still block individual jobs; blocked jobs stay pending for future retry |
+| Lever | API | Disabled by policy (default) | hCaptcha makes reliable automation low-confidence; flow defers manual apply unless explicitly re-enabled |
 
 ---
 
@@ -309,9 +302,9 @@ python3 workspace/scripts/subagent-lock.py unlock ashby
 
 ### Queue not draining
 Verify:
-1. Orchestrator is enabled and running every minute.
+1. Orchestrator is enabled and running every 5 minutes.
 2. `queue-summary.py --actionable --ats <ats>` has jobs.
-3. No ATS lock is perpetually stuck.
+3. Global apply lock is not perpetually stuck: `python3 workspace/scripts/subagent-lock.py check apply`.
 4. `batch-preflight.py` is removing dead links.
 
 ### Verify orchestration guardrail freshness
