@@ -17,7 +17,7 @@ Notes:
 - The old monolithic `Application Agent` has been replaced by `Application Orchestrator`.
 - `Email Monitor` cron job has been removed.
 - Greenhouse verification codes are fetched on-demand via `gog gmail search` in the Greenhouse application flow.
-- Current default model mix: orchestrator via Gemini (`google/gemini-3.1-pro-preview`), apply subagents via OpenRouter (`moonshotai/kimi-k2.5:nitro`), search via Gemini Flash preview.
+- Current default model mix: orchestrator via OpenRouter Arcee (`arcee-ai/trinity-large-preview:free`), apply subagents via OpenRouter Kimi (`moonshotai/kimi-k2.5:nitro`), search/health via OpenRouter Kimi.
 
 ---
 

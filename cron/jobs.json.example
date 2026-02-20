@@ -16,8 +16,8 @@
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are the SEARCH AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n## THIS SESSION — API-FIRST WORKFLOW\n1. Read search-rotation.md — pick DUE boards/queries\n2. Read company-watchlist.md — pick 2-3 DUE companies\n3. Run API search:\n- exec: python3 scripts/search-ashby-api.py --all --add\n- exec: python3 scripts/search-greenhouse-api.py --all --add\n- exec: python3 scripts/search-lever-api.py --all --add\n- exec: python3 scripts/search-vc-boards.py --all --add\n4. Brave API fallback: search, dedup-check, score, add\n5. Browser pass only for LinkedIn/YC/custom boards when needed\n\nCRITICAL:\n- Use exec scripts; do not read large queue/dedup files\n- NEVER apply to jobs in this agent",
-        "model": "google/gemini-3-flash-preview",
+        "message": "You are the SEARCH AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n## THIS SESSION \u2014 API-FIRST WORKFLOW\n1. Read search-rotation.md \u2014 pick DUE boards/queries\n2. Read company-watchlist.md \u2014 pick 2-3 DUE companies\n3. Run API search:\n- exec: python3 scripts/search-ashby-api.py --all --add\n- exec: python3 scripts/search-greenhouse-api.py --all --add\n- exec: python3 scripts/search-lever-api.py --all --add\n- exec: python3 scripts/search-vc-boards.py --all --add\n4. Brave API fallback: search, dedup-check, score, add\n5. Browser pass only for LinkedIn/YC/custom boards when needed\n\nCRITICAL:\n- Use exec scripts; do not read large queue/dedup files\n- NEVER apply to jobs in this agent",
+        "model": "openrouter/moonshotai/kimi-k2.5:nitro",
         "thinking": "low",
         "timeoutSeconds": 900
       },
@@ -43,7 +43,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "You are the APPLICATION ORCHESTRATOR.\n\nRun this flow only:\n1) exec: python3 scripts/orchestrator-dispatch.py --json\n2) exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90\n3) For each ATS in [ashby, greenhouse, lever], if ready, spawn ONE subagent in parallel via sessions_spawn.\n\nSpawn requirements:\n- unique label: apply-<ats>-<unix_ms>-<rand4>\n- retry once on \"label already in use\"\n- runTimeoutSeconds: ashby=900, greenhouse=900, lever=600\n- thinking: low\n- cleanup: keep\n\nSubagent task contract (all ATS):\n- lock first, unlock always (scripts/subagent-lock.py)\n- use ATS SKILL.md exactly\n- STRICT browser mode: NEVER action=open, ALWAYS navigate, NEVER pass targetId\n- use queue-summary output directly, process exactly TOP 1 job this run\n- if blocked by captcha/verification, keep pending and continue\n\nAfter spawning, write guardrail log once:\nexec: python3 scripts/log-orchestrator-cycle.py --ashby <...> --greenhouse <...> --lever <...> --runid-ashby \"<...>\" --runid-greenhouse \"<...>\" --runid-lever \"<...>\"\n\nReturn compact ATS lines only (SPAWNED/SKIPPED/ERROR).",
-        "model": "openrouter/google/gemini-3-pro-preview",
+        "model": "openrouter/arcee-ai/trinity-large-preview:free",
         "thinking": "low",
         "timeoutSeconds": 180
       },
@@ -69,7 +69,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "UNIFIED HEALTH + ANALYSIS CYCLE:\n\n1. exec: python3 scripts/health-check.py\n2. exec: python3 scripts/dynamic-scheduler.py\n3. exec: python3 scripts/analyze-logs.py --summary\n4. exec: python3 scripts/read-memory.py stats\n\nFor CRITICAL alerts (stuck agents, repeated failures, token issues):\n- WhatsApp immediately with issue + fix recommendation\n\nFor warnings or regressions:\n- Send concise digest with top findings + suggested fixes\n\nIf all OK and no schedule changes, respond silently.",
-        "model": "google/gemini-3-flash-preview",
+        "model": "openrouter/moonshotai/kimi-k2.5:nitro",
         "timeoutSeconds": 180
       },
       "delivery": {
