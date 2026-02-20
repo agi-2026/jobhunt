@@ -136,73 +136,176 @@ def get_pipeline_health():
     except Exception as e:
         return {'error': str(e)}, [f"ERROR: Cannot read tracker: {e}"]
 
-def get_auth_health():
-    """Check if the Anthropic API token is still valid."""
-    import urllib.request
-    import urllib.error
-    import ssl
+def _model_provider(model):
+    if not isinstance(model, str) or "/" not in model:
+        return ""
+    return model.split("/", 1)[0].strip().lower()
 
+
+def _extract_secret(cred):
+    if not isinstance(cred, dict):
+        return "", ""
+    for key in ("key", "apiKey", "token", "access"):
+        value = cred.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip(), key
+    return "", ""
+
+
+def _find_provider_profile(profiles_map, provider):
+    exact = f"{provider}:default"
+    if exact in profiles_map and isinstance(profiles_map[exact], dict):
+        return exact, profiles_map[exact]
+    for name, cred in profiles_map.items():
+        if not isinstance(cred, dict):
+            continue
+        if name.startswith(f"{provider}:") or str(cred.get("provider", "")).lower() == provider:
+            return name, cred
+    return "", {}
+
+
+def _required_provider_jobs(jobs):
+    import re
+
+    provider_to_jobs = {}
+    for job in jobs:
+        if not job.get("enabled", True):
+            continue
+        name = str(job.get("name") or "Unknown")
+        payload = job.get("payload", {})
+        providers = set()
+
+        model_provider = _model_provider(payload.get("model", ""))
+        if model_provider:
+            providers.add(model_provider)
+
+        msg = payload.get("message", "")
+        if isinstance(msg, str):
+            for match in re.finditer(r"-\s*model:\s*([^\s]+)", msg):
+                p = _model_provider(match.group(1))
+                if p:
+                    providers.add(p)
+
+        for p in providers:
+            provider_to_jobs.setdefault(p, set()).add(name)
+
+    return {p: sorted(names) for p, names in provider_to_jobs.items()}
+
+
+def _provider_recent_ok(jobs, required_job_names, now_ms, window_ms=6 * 3600 * 1000):
+    if not required_job_names:
+        return False
+    required_set = set(required_job_names)
+    for job in jobs:
+        if str(job.get("name") or "") not in required_set:
+            continue
+        state = job.get("state", {})
+        last_status = str(state.get("lastStatus") or "").lower()
+        last_run_ms = int(state.get("lastRunAtMs") or 0)
+        if last_status == "ok" and last_run_ms > 0 and (now_ms - last_run_ms) <= window_ms:
+            return True
+    return False
+
+
+def get_auth_health():
+    """Check active runtime auth for providers currently used by jobs (Google/OpenRouter)."""
     alerts = []
     auth_profiles_path = os.path.join(OPENCLAW_DIR, 'agents', 'main', 'agent', 'auth-profiles.json')
+    provider_env_keys = {
+        "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        "openrouter": ("OPENROUTER_API_KEY",),
+    }
+
     try:
         with open(auth_profiles_path, 'r') as f:
-            profiles = json.load(f)
-        cred = profiles.get('profiles', {}).get('anthropic:default', {})
-        # Support both "token" type (legacy) and "oauth" type (new)
-        token = cred.get('token', '') or cred.get('access', '')
-        cred_type = cred.get('type', 'token')
-        if not token:
-            alerts.append("CRITICAL: No Anthropic token configured")
-            return {'status': 'missing'}, alerts
-
-        # For OAuth type, check expiry instead of making API call
-        if cred_type == 'oauth':
-            import time
-            expires = cred.get('expires', 0)
-            now = int(time.time() * 1000)
-            if expires > 0 and expires > now:
-                remaining_min = (expires - now) / 60000
-                if remaining_min < 10:
-                    alerts.append(f"WARNING: OAuth token expires in {remaining_min:.0f} min")
-                return {'status': 'valid', 'type': 'oauth', 'expires_in_min': remaining_min}, []
-            elif expires > 0:
-                alerts.append("WARNING: OAuth token expired. Gateway should auto-refresh on next API call.")
-                return {'status': 'near_expiry', 'type': 'oauth'}, alerts
-            return {'status': 'valid', 'type': 'oauth'}, []
-
-        ctx = ssl.create_default_context()
-        payload = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "hi"}]
-        }).encode()
-
-        # Try Bearer (setup-token/OAuth) then x-api-key
-        for auth_headers in [
-            {"Authorization": f"Bearer {token}"},
-            {"x-api-key": token},
-        ]:
-            try:
-                headers = {"anthropic-version": "2023-06-01",
-                           "Content-Type": "application/json", **auth_headers}
-                req = urllib.request.Request(
-                    "https://api.anthropic.com/v1/messages",
-                    data=payload, headers=headers)
-                urllib.request.urlopen(req, timeout=10, context=ctx)
-                return {'status': 'valid'}, []
-            except urllib.error.HTTPError as e:
-                if e.code in (400, 429):
-                    return {'status': 'valid'}, []
-                elif e.code == 401:
-                    continue  # Try next auth method
-                else:
-                    return {'status': f'http_{e.code}'}, []
-
-        alerts.append('CRITICAL: Anthropic token EXPIRED (401). Run: python3 scripts/refresh-token.py set "<new-token>"')
-        return {'status': 'expired'}, alerts
+            auth_data = json.load(f)
+        with open(JOBS_JSON, 'r') as f:
+            jobs_data = json.load(f)
     except Exception as e:
-        alerts.append(f"WARNING: Cannot verify Anthropic token: {e}")
+        alerts.append(f"WARNING: Cannot read auth/job config: {e}")
         return {'status': 'unknown'}, alerts
+
+    profiles_map = auth_data.get("profiles", {})
+    jobs = jobs_data.get("jobs", [])
+    provider_jobs = _required_provider_jobs(jobs)
+    required = sorted(p for p in provider_jobs.keys() if p in ("google", "openrouter"))
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    providers = {}
+
+    for provider in required:
+        profile_name, cred = _find_provider_profile(profiles_map, provider)
+        token, token_field = _extract_secret(cred)
+        source = ""
+        if token and profile_name:
+            source = f"profile:{profile_name}:{token_field}"
+
+        if not token:
+            for env_name in provider_env_keys.get(provider, ()):
+                env_value = (os.environ.get(env_name) or "").strip()
+                if env_value:
+                    token = env_value
+                    source = f"env:{env_name}"
+                    break
+
+        cred_type = str(cred.get("type") or "")
+        status = "valid"
+        expires_in_min = None
+
+        if token and cred_type == "oauth":
+            expires = int(cred.get("expires") or 0)
+            if expires > 0:
+                expires_in_min = (expires - now_ms) / 60000
+                if expires_in_min <= 0:
+                    status = "near_expiry"
+                    alerts.append(f"WARNING: {provider} OAuth token expired in profile {profile_name}")
+                elif expires_in_min < 10:
+                    status = "near_expiry"
+                    alerts.append(f"WARNING: {provider} OAuth token expires in {expires_in_min:.0f} min")
+        elif not token:
+            if _provider_recent_ok(jobs, provider_jobs.get(provider, []), now_ms):
+                status = "inferred_valid"
+                source = "runtime:last_success"
+            else:
+                status = "missing"
+                if provider == "openrouter":
+                    alerts.append(
+                        "CRITICAL: Missing OpenRouter credential. Configure openrouter:default key or OPENROUTER_API_KEY."
+                    )
+                else:
+                    alerts.append(
+                        "WARNING: Google credential not found in auth-profiles/env. Verify gateway provider auth."
+                    )
+
+        providers[provider] = {
+            "status": status,
+            "profile": profile_name or "",
+            "source": source or "none",
+            "type": cred_type or "unknown",
+            "required_by_jobs": provider_jobs.get(provider, []),
+        }
+        if expires_in_min is not None:
+            providers[provider]["expires_in_min"] = round(expires_in_min, 1)
+
+    if not required:
+        return {
+            "status": "not_required",
+            "required_providers": [],
+            "providers": {},
+        }, alerts
+
+    provider_statuses = [v.get("status", "unknown") for v in providers.values()]
+    if any(s == "missing" for s in provider_statuses):
+        overall = "missing"
+    elif any(s in {"near_expiry", "unknown"} for s in provider_statuses):
+        overall = "degraded"
+    else:
+        overall = "valid"
+
+    return {
+        "status": overall,
+        "required_providers": required,
+        "providers": providers,
+    }, alerts
 
 
 def get_orchestrator_guardrail_health():
@@ -385,8 +488,19 @@ def main():
             print(f"  {a}")
         print()
 
-    auth_icon = "OK" if auth.get('status') == 'valid' else "EXPIRED" if auth.get('status') == 'expired' else auth.get('status', '?').upper()
-    print(f"AUTH: {auth_icon}\n")
+    auth_status = str(auth.get('status', 'unknown'))
+    if auth_status == 'valid':
+        auth_icon = "OK"
+    elif auth_status in {'degraded', 'near_expiry'}:
+        auth_icon = "WARN"
+    elif auth_status in {'missing', 'expired'}:
+        auth_icon = "CRITICAL"
+    else:
+        auth_icon = auth_status.upper()
+    print(f"AUTH: {auth_icon}")
+    for provider, detail in auth.get('providers', {}).items():
+        print(f"  - {provider}: {detail.get('status')} ({detail.get('source')})")
+    print()
     print(f"ORCHESTRATOR GUARDRAIL: {orchestrator_guardrail}\n")
     print(f"SUBAGENT GUARDRAIL: {subagent_guardrail}\n")
 
