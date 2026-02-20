@@ -5,11 +5,24 @@ description: Lever ATS application agent. Simple native forms, resume upload, di
 
 # Apply Lever — Application Skill
 
-## STATUS: DISABLED (2026-02-17)
-All Lever forms now include invisible hCaptcha verification. Headless Chrome cannot solve hCaptcha. The orchestrator no longer dispatches Lever subagents. Lever jobs remain in the queue for Howard to apply manually.
-
 ## Browser Profile
 Always use `profile="lever"` for ALL browser actions (snapshot, navigate, act, upload).
+Never pass `targetId` in browser actions. Ignore `targetId` values returned by browser tools.
+Browser tool schema reminder (CRITICAL):
+- JS execution must use `action="act"` with nested `request.kind="evaluate"`.
+- For ALL `action="act"` calls, put click/type/evaluate params inside `request={...}`.
+- File upload uses `action="upload"` with top-level `paths` and `element|ref|inputRef` (not `request.kind="upload"`).
+- `action="evaluate"` is invalid and will fail.
+- Top-level `kind/ref/text/paths` with `action="act"` can fail with `request required`.
+- Canonical evaluate call shape: `{"action":"act","profile":"lever","request":{"kind":"evaluate","fn":"<full_js_source>","timeoutMs":30000}}`
+
+## Metadata-First Retrieval (CRITICAL)
+Before reading large files:
+- `exec: python3 scripts/context-manifest.py list --profile apply-lever --limit 20`
+- `exec: python3 scripts/tool-menu.py --profile lever --json`
+- Use `exec: python3 scripts/context-manifest.py read <entry_id> --section "<heading>" --max-lines 180` for targeted reads.
+- In apply runs, use only `exec` + `browser` + `process` tools. Do not use `read`/`write`/`edit` tools.
+- Avoid direct full-file reads unless manifest access fails.
 
 ## Single-Job Guardrail (CRITICAL)
 - Work exactly **ONE URL per subagent run**.
@@ -18,15 +31,12 @@ Always use `profile="lever"` for ALL browser actions (snapshot, navigate, act, u
 - If terminal outcome is reached, stop the run and unlock.
 - Do not start a second application in the same subagent run.
 
-## Disabled Mode Enforcement (CRITICAL, OVERRIDES PHASES BELOW)
-Lever auto-apply is disabled because hCaptcha blocks reliable automation.
-
-For each Lever subagent run, after choosing the single top URL:
-1. `exec: python3 scripts/preflight-check.py "<url>"`
-2. If `DEAD`: `exec: python3 scripts/remove-from-queue.py "<url>"`, set terminal outcome `SKIPPED`, and STOP.
-3. If `ALIVE`: `exec: python3 scripts/defer-manual-apply.py "<url>" "<Company>" "<Title>" "lever" --reason "Lever automation disabled (hCaptcha)"`, set terminal outcome `DEFERRED`, and STOP.
-4. Do **NOT** navigate to the Lever page in disabled mode.
-5. Always unlock at the end per the subagent FINALLY rule.
+## Runtime Budget (CRITICAL)
+- Target completion time: 4-8 minutes per job.
+- If no terminal outcome after 8 minutes, set terminal outcome `DEFERRED` and STOP this run.
+- On browser infrastructure errors (`Can't reach the OpenClaw browser control service`, `browser connection lost`, `target closed`, `service unavailable`), stop retrying immediately, set terminal outcome `DEFERRED`, and STOP this run.
+- Never spend more than 90 seconds retrying infrastructure failures.
+- Snapshot budget: max 3 full snapshots per run. Avoid repeated full snapshots unless required for submit/captcha troubleshooting.
 
 ## Queue Selection
 ```
@@ -50,8 +60,9 @@ exec: python3 scripts/search-connections.py "<Company Name>"
 
 ### Phase 1: Navigate
 - `browser navigate <url> profile="lever"`
-- Wait 3s. Take snapshot.
-- Handle cookie consent popups.
+- Wait 2-3s.
+- Do NOT take a full snapshot immediately after navigate.
+- Handle cookie consent popups only if they visibly block interaction.
 - If 404 / expired: skip, remove from queue, set terminal outcome `SKIPPED`, and STOP this run.
 
 ### Phase 2: Fill Form
@@ -59,11 +70,16 @@ Copy resume first:
 ```
 exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
 ```
-Read `skills/apply-lever/scripts/form-filler.js` and run via `browser act kind=evaluate script="..." timeoutMs=30000 profile="lever"`.
+Read `skills/apply-lever/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="lever"`.
+Load canonical JS via manifest immediately before evaluate:
+```
+exec: python3 scripts/context-manifest.py read lever_form_filler --max-lines 1400 --raw
+```
 When running evaluate:
 - Paste the **entire file contents** exactly (starts with `(function() {`).
 - Do **NOT** run `formFiller()` or any symbol-only snippet.
 - If error contains `formFiller is not defined`, re-read the file and re-run once with full file contents.
+- Run the form-filler evaluate directly after navigation (before first full snapshot) to reduce context and latency.
 Parse the returned JSON.
 
 **Lever uses native HTML forms** — no React comboboxes, no toggle buttons. The form-filler handles everything via JS. No Playwright interaction needed for dropdowns (native `<select>` elements).
@@ -71,7 +87,7 @@ Parse the returned JSON.
 ### Phase 2.5: Playwright Re-fill (if needed)
 If `playwrightFields[]` is non-empty, re-type those fields using Playwright:
 ```
-browser act kind=type ref="<ref or selector>" text="<value>" profile="lever"
+browser action="act" profile="lever" request={"kind":"type","ref":"<ref or selector>","text":"<value>"}
 ```
 **Location field** is the most common — JS setNativeValue doesn't trigger Lever's autocomplete, so the value doesn't persist. Playwright `type` sends real keyboard events that activate the autocomplete.
 
@@ -81,13 +97,16 @@ browser act kind=type ref="<ref or selector>" text="<value>" profile="lever"
 Wait 1-2 seconds after Phase 2/2.5 completes, then upload:
 Use `inputElement` from `fileUploadSelectors` (returned by form-filler.js) for a precise selector:
 ```
-browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000 profile="lever"
+browser action="upload" profile="lever" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
 ```
 If `inputElement` is not available, fallback to `element="input[type=file]"`.
 
 **After upload, ALWAYS run verify-upload.js** to re-dispatch React events:
+Load helper only when needed:
+`exec: python3 scripts/context-manifest.py read lever_verify_upload --max-lines 220 --raw`
+Then run:
 ```
-browser act kind=evaluate script="<contents of scripts/verify-upload.js>" timeoutMs=10000 profile="lever"
+browser action="act" profile="lever" request={"kind":"evaluate","fn":"<contents of scripts/verify-upload.js>","timeoutMs":10000}
 ```
 Check the returned JSON: if `verified: false` or errors mention validation, take a snapshot and retry upload.
 
@@ -96,9 +115,11 @@ If `customQuestions[]` is non-empty:
 - Generate concise, truthful answers from resume/profile context. Do not invent specific facts.
 - Build `window.__CUSTOM_ANSWERS__` as an array of `{ selector, value, type }` using entries from `customQuestions[]`.
 - Set answers payload:
-  `browser act kind=evaluate script="window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>" profile="lever"`
-- Read `skills/apply-lever/scripts/fill-custom-answers.js` and run it via:
-  `browser act kind=evaluate script="..." timeoutMs=30000 profile="lever"`
+  `browser action="act" profile="lever" request={"kind":"evaluate","fn":"window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>"}`
+- Load custom-answer helper only when needed:
+  `exec: python3 scripts/context-manifest.py read lever_custom_answers --max-lines 260 --raw`
+  then run it via:
+  `browser action="act" profile="lever" request={"kind":"evaluate","fn":"...","timeoutMs":30000}`
 - If required custom-question validation still fails after up to 2 correction attempts, set terminal outcome `DEFERRED`.
 
 ### Phase 5: Submit
@@ -110,7 +131,9 @@ If `customQuestions[]` is non-empty:
 After clicking submit, hCaptcha may appear as an overlay with an image grid challenge.
 
 **Detection:**
-Run `scripts/detect-hcaptcha.js` via evaluate. If `detected: true`, proceed with solving.
+Load hCaptcha detector only when needed:
+`exec: python3 scripts/context-manifest.py read lever_detect_hcaptcha --max-lines 220 --raw`
+then run via evaluate. If `detected: true`, proceed with solving.
 Alternatively, if the post-submit snapshot shows an image grid overlay with a prompt like "Please click each image containing a ___", that's hCaptcha.
 
 **Solving (max 5 rounds):**
@@ -122,7 +145,7 @@ Alternatively, if the post-submit snapshot shows an image grid overlay with a pr
 3. Click each matching image one at a time using `act: click` on the image cell.
    - Use the visual ref from the snapshot if available.
    - If refs don't work (cross-origin iframe), use coordinate-based clicking:
-     `browser act kind=click x=<X> y=<Y> profile="lever"`
+     `browser action="act" profile="lever" request={"kind":"click","x":<X>,"y":<Y>}`
      where X,Y are the CENTER coordinates of each matching grid cell.
 4. After clicking all matching images, click the "Verify" button.
 5. Take another snapshot:
@@ -177,7 +200,7 @@ Lever forms can cause browser refs to go stale on large pages. Strategy:
 
 ## Lever-Specific Notes
 - Simplest ATS: usually name, email, phone, resume, LinkedIn, optional additional info
-- hCaptcha present on many Lever forms since Feb 2026. Solve using vision (Phase 5.5). If solving fails after 5 rounds, keep pending for future retries.
+- hCaptcha present on many Lever forms since Feb 2026. Solve using vision (Phase 5.5). If solving fails after 5 rounds, defer to manual apply.
 - Native HTML `<select>` dropdowns — all filled by JS (no Playwright needed for dropdowns)
 - Fastest target: 2-4 minutes per application when working correctly
 - Main failure mode is ref staleness, not form complexity

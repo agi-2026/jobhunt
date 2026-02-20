@@ -116,11 +116,29 @@ def main() -> int:
     parser.add_argument("--runid-ashby", default="")
     parser.add_argument("--runid-greenhouse", default="")
     parser.add_argument("--runid-lever", default="")
+    # Backward-compatible hallucinated flags seen in model outputs.
+    parser.add_argument("--spawn-ashby", default="")
+    parser.add_argument("--spawn-greenhouse", default="")
+    parser.add_argument("--spawn-lever", default="")
     parser.add_argument("--note", default="")
     args = parser.parse_args()
 
     if args.check_fresh:
         return check_fresh(args.max_age_min)
+
+    # If spawn-* flags are present, treat them as explicit SPAWNED status + run id hints.
+    if args.spawn_ashby:
+        args.ashby = "SPAWNED"
+        if not args.runid_ashby:
+            args.runid_ashby = args.spawn_ashby
+    if args.spawn_greenhouse:
+        args.greenhouse = "SPAWNED"
+        if not args.runid_greenhouse:
+            args.runid_greenhouse = args.spawn_greenhouse
+    if args.spawn_lever:
+        args.lever = "SPAWNED"
+        if not args.runid_lever:
+            args.runid_lever = args.spawn_lever
 
     try:
         ashby = normalize_status(args.ashby)

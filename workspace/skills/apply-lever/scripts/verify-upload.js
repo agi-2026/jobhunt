@@ -1,7 +1,8 @@
 // verify-upload.js — Post-upload verification and React event re-dispatch
-// Run via: browser act kind=evaluate fn="<this file>" profile="<profile>"
+// Run via browser tool:
+// action="act", profile="<profile>", request={kind:"evaluate", fn:"<this file>"}
 // Run AFTER the browser upload action to ensure React forms recognize the uploaded file.
-(() => {
+() => {
   const results = { verified: false, errors: [], actions: [] };
 
   const fileInputs = document.querySelectorAll('input[type="file"]');
@@ -112,4 +113,4 @@
   });
 
   return JSON.stringify(results, null, 2);
-})();
+}

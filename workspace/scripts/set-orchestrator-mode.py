@@ -19,128 +19,264 @@ RUNTIME_CRON_PATH = os.path.expanduser("~/.openclaw/cron/jobs.json")
 ORCHESTRATOR_NAME = "Application Orchestrator"
 
 
-FULL_MESSAGE = """You are the APPLICATION ORCHESTRATOR. Execute these steps IN ORDER then STOP.
+FULL_MESSAGE = """You are the APPLICATION ORCHESTRATOR. Be deterministic and concise.
 
-STEP 1 — PREFLIGHT:
-exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90
+METADATA-FIRST CONTEXT (CRITICAL)
+1) exec: python3 scripts/context-manifest.py build
+2) exec: python3 scripts/context-manifest.py list --profile orchestrator --limit 20
+Only read file contents if needed, via:
+  exec: python3 scripts/context-manifest.py read <entry_id> [--section "<heading>"] [--max-lines 180]
+Do NOT load large files directly by path unless manifest lookup fails.
 
-STEP 2 — CHECK GLOBAL LOCK:
+STEP 1 — CHECK GLOBAL LOCK FIRST:
 exec: python3 scripts/subagent-lock.py check apply
-If LOCKED -> output "SKIPPED_LOCKED" and STOP. Do nothing else.
+If LOCKED -> output "SKIPPED_LOCKED" and STOP.
 
-STEP 3 — PICK ONE ATS TYPE BY TRUE GLOBAL TOP SCORE:
-a) exec: python3 scripts/orchestrator-dispatch.py --json
-b) Consider ALL ATS in the snapshot: ashby, greenhouse, lever.
-c) From ATS entries where status == "READY", choose the type with the highest top_score.
-   Tie-break order if scores are equal: ashby > greenhouse > lever.
-d) If no ATS is READY -> output "SKIPPED_EMPTY" and STOP.
+STEP 2 — PREFLIGHT:
+exec: python3 scripts/batch-preflight.py --all --remove --top 8 --timeout 90
 
-STEP 4 — SPAWN EXACTLY ONE SUBAGENT for the chosen type:
+STEP 3 — DISPATCH:
+exec: python3 scripts/orchestrator-dispatch.py --json
+Pick exactly ONE ATS from READY entries (ashby, greenhouse, lever):
+- highest top_score wins
+- tie-break: ashby > greenhouse > lever
+If none READY -> output "SKIPPED_EMPTY" and STOP.
+
+STEP 4 — SPAWN EXACTLY ONE SUBAGENT:
 sessions_spawn with:
 - label: apply-<type>-<unix_ms>-<rand4>
-- model: openrouter/moonshotai/kimi-k2.5:nitro
-- thinking: medium
-- runTimeoutSeconds: 900
-- cleanup: delete
-Use the task template for the chosen type below.
-After sessions_spawn returns -> output "SPAWNED <type>" and STOP IMMEDIATELY.
-DO NOT check or spawn any other ATS type. You are DONE.
+- model: openrouter/stepfun/step-3.5-flash
+- thinking: low
+- runTimeoutSeconds: 360
+- cleanup: keep
+- agentId: main (or omit agentId; NEVER use apply-* ids)
+If spawn fails with forbidden/disallowed agentId, retry once with agentId=main.
+Use ATS task template below.
+CRITICAL TASK COPY RULE:
+- The `task` argument MUST be copied VERBATIM from the selected ATS TASK TEMPLATE block below.
+- Do NOT summarize/paraphrase. Forbidden examples: "follow template", "run apply sequence", "acquire lock and apply".
+- If you cannot provide the full verbatim template, output exactly: "ERROR_TASK_NOT_VERBATIM" and STOP.
+- The task must include the queue-summary line and the FINALLY unlock line from the template.
+After accepted spawn, output exactly: "SPAWNED <type>" and STOP immediately.
 
---- TASK: GREENHOUSE ---
-Apply to Greenhouse jobs. You are a subagent.
-FIRST: exec: python3 scripts/subagent-lock.py lock apply
-Read skills/apply-greenhouse/SKILL.md and follow ALL phases exactly.
-Browser: always use profile="greenhouse". NEVER pass targetId.
-CANONICAL FORM-FILLER PATH: skills/apply-greenhouse/scripts/form-filler.js (exact path only).
-1. exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
-2. exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url
-3. Set TARGET_URL to the single URL returned in step 2. TARGET_URL is immutable for this run.
-4. exec: python3 scripts/preflight-check.py "<TARGET_URL>"
-   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed" then output STATUS=SKIPPED_DEAD and STOP.
-5. Apply only TARGET_URL following SKILL.md phases. Do not open a second URL in this run.
-   If canonical form-filler path cannot be read, output STATUS=DEFERRED_CANONICAL_FILLER and STOP (do NOT improvise JS filler).
-6. After MyGreenhouse autofill: verify First Name="Howard", Disability="I do not wish to answer".
-7. After each successful submit: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
-8. Skip: Databricks, and any company in skip-companies.json.
-9. On any terminal result for TARGET_URL (SUBMITTED/SKIPPED/DEFERRED), STOP this run immediately.
+--- TASK TEMPLATE: GREENHOUSE ---
+Apply one Greenhouse job only.
+FIRST:
+- exec: python3 scripts/subagent-lock.py lock apply
+- exec: python3 scripts/context-manifest.py build
+- exec: python3 scripts/context-manifest.py list --profile apply-greenhouse --limit 20
+- exec: python3 scripts/tool-menu.py --profile greenhouse --json
+- Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
+Then:
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+2) exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url
+3) Set immutable TARGET_URL from step 2.
+4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
+   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed"; output STATUS=SKIPPED_DEAD; STOP.
+5) Keep context minimal (no large runbook reads):
+   - Do NOT read greenhouse_skill sections in normal flow; follow this task template directly.
+   - Read greenhouse_form_filler only immediately before first browser evaluate via:
+     exec: python3 scripts/context-manifest.py read greenhouse_form_filler --max-lines 360 --raw
+   - Do NOT use `python -c`, `cat`, `sed`, or any direct file read for form-filler.js; only the context-manifest command above is allowed.
+   - Read greenhouse_custom_answers / greenhouse_verify_code only if those branches are actually needed.
+   - After form-filler evaluate, continue directly to combobox/upload/submit; avoid extra large reads.
+   - For resume upload, use browser `action=upload` with top-level `paths` and `element` (or `ref`/`inputRef`) from fileUploadSelectors (do NOT click "Attach" first).
+6) Browser schema is strict:
+   - JS evaluate MUST use browser `action=act` with `request.kind=evaluate`.
+   - For multiline JS (form-filler/custom helpers), put code in `request.fn` (full function text from JS source).
+   - `request.fn` must be COMPLETE source (no placeholders like `...`, `[...]`, or `(truncated for brevity)`).
+   - For ALL `action=act` calls, kind/args must be inside `request={...}` (never top-level `kind/ref/text/paths`).
+   - `request` MUST be an object, never a JSON string (invalid: `request: "{...}"`).
+   - Canonical evaluate call shape: `{"action":"act","profile":"<ats-profile>","request":{"kind":"evaluate","fn":"<full_js_source>"}}`.
+   - If browser validation says `request: must be object` or shows `"request": "{...}"`, output STATUS=DEFERRED_TOOL_SCHEMA and STOP immediately (do not retry the same call).
+   - File upload is NOT an `act` request: use browser `action=upload` with top-level `paths` + (`element` or `ref` or `inputRef`).
+   - `action=evaluate` is invalid.
+   - Never pass targetId.
+   - If the same browser schema/validation error repeats twice, output STATUS=DEFERRED_TOOL_SCHEMA and STOP.
+   - If browser tool returns timeout/unreachable/control-service error: output STATUS=DEFERRED_BROWSER_TIMEOUT and STOP immediately.
+7) On confirmed submit only: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
+8) Terminal outcomes allowed: SUBMITTED / SKIPPED / DEFERRED. After one terminal outcome, STOP run.
 FINALLY (even on error): exec: python3 scripts/subagent-lock.py unlock apply
-NEVER restart the gateway. NEVER run any command matching "openclaw gateway*".
 
---- TASK: ASHBY ---
-Apply to Ashby jobs. You are a subagent.
-FIRST: exec: python3 scripts/subagent-lock.py lock apply
-Read skills/apply-ashby/SKILL.md and follow ALL phases exactly.
-Browser: always use profile="ashby". NEVER pass targetId.
-CANONICAL FORM-FILLER PATH: skills/apply-ashby/scripts/form-filler.js (exact path only).
-1. exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
-2. exec: python3 scripts/queue-summary.py --actionable --ats ashby --top 1 --full-url
-3. Set TARGET_URL to the single URL returned in step 2. TARGET_URL is immutable for this run.
-4. exec: python3 scripts/preflight-check.py "<TARGET_URL>"
-   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed" then output STATUS=SKIPPED_DEAD and STOP.
-5. Apply only TARGET_URL following SKILL.md phases. Do not open a second URL in this run.
-   If canonical form-filler path cannot be read, output STATUS=DEFERRED_CANONICAL_FILLER and STOP (do NOT improvise JS filler).
-6. After each successful submit: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
-7. Skip: Sesame AI, and any company in skip-companies.json.
-8. On any terminal result for TARGET_URL (SUBMITTED/SKIPPED/DEFERRED), STOP this run immediately.
+--- TASK TEMPLATE: ASHBY ---
+Apply one Ashby job only.
+FIRST:
+- exec: python3 scripts/subagent-lock.py lock apply
+- exec: python3 scripts/context-manifest.py build
+- exec: python3 scripts/context-manifest.py list --profile apply-ashby --limit 20
+- exec: python3 scripts/tool-menu.py --profile ashby --json
+- Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
+Then:
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+2) exec: python3 scripts/queue-summary.py --actionable --ats ashby --top 1 --full-url
+3) Set immutable TARGET_URL from step 2.
+4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
+   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed"; output STATUS=SKIPPED_DEAD; STOP.
+5) Use lazy metadata reads via manifest (do NOT preload large JS):
+   - exec: python3 scripts/context-manifest.py read ashby_skill --section "Application Flow" --max-lines 180
+   - exec: python3 scripts/context-manifest.py read ashby_skill --section "Browser Profile" --max-lines 80
+   - Read ashby_form_filler full only immediately before first browser evaluate via:
+     exec: python3 scripts/context-manifest.py read ashby_form_filler --max-lines 1400 --raw
+   - Do NOT use `python -c`, `cat`, `sed`, or any direct file read for form-filler.js; only the context-manifest command above is allowed.
+   - Read ashby_custom_answers only if customQuestions[] is non-empty.
+6) Browser schema is strict:
+   - JS evaluate MUST use browser `action=act` with `request.kind=evaluate`.
+   - For multiline JS (form-filler/custom helpers), put code in `request.fn` (full function text from JS source).
+   - `request.fn` must be COMPLETE source (no placeholders like `...`, `[...]`, or `(truncated for brevity)`).
+   - For ALL `action=act` calls, kind/args must be inside `request={...}` (never top-level `kind/ref/text/paths`).
+   - `request` MUST be an object, never a JSON string (invalid: `request: "{...}"`).
+   - Canonical evaluate call shape: `{"action":"act","profile":"<ats-profile>","request":{"kind":"evaluate","fn":"<full_js_source>"}}`.
+   - If browser validation says `request: must be object` or shows `"request": "{...}"`, output STATUS=DEFERRED_TOOL_SCHEMA and STOP immediately (do not retry the same call).
+   - File upload is NOT an `act` request: use browser `action=upload` with top-level `paths` + (`element` or `ref` or `inputRef`).
+   - `action=evaluate` is invalid.
+   - Never pass targetId.
+   - If the same browser schema/validation error repeats twice, output STATUS=DEFERRED_TOOL_SCHEMA and STOP.
+   - If browser tool returns timeout/unreachable/control-service error: output STATUS=DEFERRED_BROWSER_TIMEOUT and STOP immediately.
+7) On confirmed submit only: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
+8) Terminal outcomes allowed: SUBMITTED / SKIPPED / DEFERRED. After one terminal outcome, STOP run.
 FINALLY (even on error): exec: python3 scripts/subagent-lock.py unlock apply
-NEVER restart the gateway. NEVER run any command matching "openclaw gateway*".
 
---- TASK: LEVER ---
-Apply to Lever jobs. You are a subagent.
-FIRST: exec: python3 scripts/subagent-lock.py lock apply
-Read skills/apply-lever/SKILL.md and follow ALL phases exactly.
-Browser: always use profile="lever". NEVER pass targetId.
-CANONICAL FORM-FILLER PATH: skills/apply-lever/scripts/form-filler.js (exact path only).
-1. exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
-2. exec: python3 scripts/queue-summary.py --actionable --ats lever --top 1 --full-url
-3. Set TARGET_URL to the single URL returned in step 2. TARGET_URL is immutable for this run.
-4. exec: python3 scripts/preflight-check.py "<TARGET_URL>"
-   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed" then output STATUS=SKIPPED_DEAD and STOP.
-5. Apply only TARGET_URL following SKILL.md phases. Do not open a second URL in this run.
-   If canonical form-filler path cannot be read, output STATUS=DEFERRED_CANONICAL_FILLER and STOP (do NOT improvise JS filler).
-6. After each successful submit: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
-7. Skip any company in skip-companies.json.
-8. On any terminal result for TARGET_URL (SUBMITTED/SKIPPED/DEFERRED), STOP this run immediately.
+--- TASK TEMPLATE: LEVER ---
+Apply one Lever job only.
+FIRST:
+- exec: python3 scripts/subagent-lock.py lock apply
+- exec: python3 scripts/context-manifest.py build
+- exec: python3 scripts/context-manifest.py list --profile apply-lever --limit 20
+- exec: python3 scripts/tool-menu.py --profile lever --json
+- Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
+Then:
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+2) exec: python3 scripts/queue-summary.py --actionable --ats lever --top 1 --full-url
+3) Set immutable TARGET_URL from step 2.
+4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
+   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed"; output STATUS=SKIPPED_DEAD; STOP.
+5) Keep context minimal (no large runbook reads):
+   - Do NOT read lever_skill sections in normal flow; follow this task template directly.
+   - Read lever_form_filler only immediately before first browser evaluate via:
+     exec: python3 scripts/context-manifest.py read lever_form_filler --max-lines 360 --raw
+   - Do NOT use `python -c`, `cat`, `sed`, or any direct file read for form-filler.js; only the context-manifest command above is allowed.
+   - Read lever_custom_answers only if customQuestions[] is non-empty.
+   - Read lever_detect_hcaptcha only after submit if captcha branch is detected.
+6) Browser schema is strict:
+   - JS evaluate MUST use browser `action=act` with `request.kind=evaluate`.
+   - For multiline JS (form-filler/custom helpers), put code in `request.fn` (full function text from JS source).
+   - `request.fn` must be COMPLETE source (no placeholders like `...`, `[...]`, or `(truncated for brevity)`).
+   - For ALL `action=act` calls, kind/args must be inside `request={...}` (never top-level `kind/ref/text/paths`).
+   - `request` MUST be an object, never a JSON string (invalid: `request: "{...}"`).
+   - Canonical evaluate call shape: `{"action":"act","profile":"<ats-profile>","request":{"kind":"evaluate","fn":"<full_js_source>"}}`.
+   - If browser validation says `request: must be object` or shows `"request": "{...}"`, output STATUS=DEFERRED_TOOL_SCHEMA and STOP immediately (do not retry the same call).
+   - File upload is NOT an `act` request: use browser `action=upload` with top-level `paths` + (`element` or `ref` or `inputRef`).
+   - `action=evaluate` is invalid.
+   - Never pass targetId.
+   - If the same browser schema/validation error repeats twice, output STATUS=DEFERRED_TOOL_SCHEMA and STOP.
+   - If browser tool returns timeout/unreachable/control-service error: output STATUS=DEFERRED_BROWSER_TIMEOUT and STOP immediately.
+7) On confirmed submit only: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
+8) Terminal outcomes allowed: SUBMITTED / SKIPPED / DEFERRED. After one terminal outcome, STOP run.
 FINALLY (even on error): exec: python3 scripts/subagent-lock.py unlock apply
-NEVER restart the gateway. NEVER run any command matching "openclaw gateway*".
 
-## ABSOLUTE RULES:
-- SPAWN EXACTLY 1 SUBAGENT PER CYCLE. After spawning, STOP.
-- NEVER read job-queue.md, dedup-index.md, or job-tracker.md
-- NEVER restart the gateway or run any command matching "openclaw gateway*"
-- Subagent must use canonical form-filler path for its ATS; never generate custom full-form filler JS
-- Subagent must never call queue-summary more than once per run."""
+## ABSOLUTE RULES
+- SPAWN EXACTLY 1 SUBAGENT PER CYCLE, then STOP.
+- NEVER read job-queue.md, dedup-index.md, or job-tracker.md into context.
+- NEVER restart the gateway or run any command matching "openclaw gateway*".
+- Subagent must not call queue-summary more than once per run.
+- Subagent must use only exec + browser + process during apply runs (no read/write/edit tools).
+- Do not execute .js files with python/node; for JS helpers, read content then pass to browser `action=act` with `request.kind=evaluate`.
+- Never read form-filler.js via `python -c`, `cat`, `sed`, `awk`, or `head`; only `python3 scripts/context-manifest.py read <*_form_filler> ... --raw` is allowed.
+- Subagent must NEVER run `openclaw` commands of any kind during apply runs (especially `openclaw gateway *`).
+- If scripts/log-orchestrator-cycle.py is used, only supported flags are:
+  --ashby <SPAWNED|SKIPPED_LOCKED|SKIPPED_EMPTY|SKIPPED_NOT_CHOSEN|ERROR|UNKNOWN>
+  --greenhouse <SPAWNED|SKIPPED_LOCKED|SKIPPED_EMPTY|SKIPPED_NOT_CHOSEN|ERROR|UNKNOWN>
+  --lever <SPAWNED|SKIPPED_LOCKED|SKIPPED_EMPTY|SKIPPED_NOT_CHOSEN|ERROR|UNKNOWN>
+  --runid-ashby/--runid-greenhouse/--runid-lever/--note."""
 
 
 GREENHOUSE_ONLY_MESSAGE = """You are the APPLICATION ORCHESTRATOR (GREENHOUSE-ONLY MODE).
 
-Run this flow only:
-1) `exec: python3 scripts/orchestrator-dispatch.py --json`
-2) `exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90`
-3) Only process ATS=greenhouse in this mode. If greenhouse is ready, spawn ONE greenhouse subagent.
+METADATA-FIRST CONTEXT:
+1) exec: python3 scripts/context-manifest.py build
+2) exec: python3 scripts/context-manifest.py list --profile orchestrator --limit 20
 
-Spawn requirements:
-- unique label: apply-greenhouse-<unix_ms>-<rand4>
-- retry once on "label already in use"
-- runTimeoutSeconds: greenhouse=900
-- thinking: medium
-- cleanup: delete
+STEP 1 — CHECK GLOBAL LOCK FIRST:
+exec: python3 scripts/subagent-lock.py check apply
+If LOCKED -> output "SKIPPED_LOCKED" and STOP.
 
-Subagent task contract (greenhouse):
-- lock first, unlock always (`scripts/subagent-lock.py`)
-- use skills/apply-greenhouse/SKILL.md exactly
-- STRICT browser mode: NEVER action=open, ALWAYS navigate, NEVER pass targetId
-- canonical form-filler path only: `skills/apply-greenhouse/scripts/form-filler.js` (do not improvise JS filler)
-- NEVER run any command matching `openclaw gateway*`
-- `exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url` exactly once
-- bind to that one TARGET_URL for the whole run; never run queue-summary again
-- preflight TARGET_URL once; if dead, remove and STOP this run
-- on terminal result for TARGET_URL (SUBMITTED/SKIPPED/DEFERRED), STOP this run immediately
+STEP 2 — PREFLIGHT:
+exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90
+
+STEP 3 — DISPATCH:
+exec: python3 scripts/orchestrator-dispatch.py --json
+Only process ATS=greenhouse in this mode.
+If greenhouse not READY -> output "SKIPPED_EMPTY" and STOP.
+
+STEP 4 — SPAWN EXACTLY ONE GREENHOUSE SUBAGENT:
+sessions_spawn with:
+- label: apply-greenhouse-<unix_ms>-<rand4>
+- model: openrouter/stepfun/step-3.5-flash
+- thinking: low
+- runTimeoutSeconds: 360
+- cleanup: keep
+- agentId: main (or omit agentId; NEVER use apply-* ids)
+If spawn fails with forbidden/disallowed agentId, retry once with agentId=main.
+CRITICAL TASK COPY RULE:
+- The `task` argument MUST be copied VERBATIM from the GREENHOUSE TASK TEMPLATE block below.
+- Do NOT summarize/paraphrase. Forbidden examples: "follow template", "run apply sequence", "acquire lock and apply".
+- If you cannot provide the full verbatim template, output exactly: "ERROR_TASK_NOT_VERBATIM" and STOP.
+- The task must include all of these exact lines:
+  - `Apply one Greenhouse job only.`
+  - `2) exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url`
+  - `FINALLY (even on error): exec: python3 scripts/subagent-lock.py unlock apply`
+After accepted spawn, output exactly: "SPAWNED greenhouse" and STOP immediately.
+
+--- TASK TEMPLATE: GREENHOUSE ---
+Apply one Greenhouse job only.
+FIRST:
+- exec: python3 scripts/subagent-lock.py lock apply
+- exec: python3 scripts/context-manifest.py build
+- exec: python3 scripts/context-manifest.py list --profile apply-greenhouse --limit 20
+- exec: python3 scripts/tool-menu.py --profile greenhouse --json
+- Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
+Then:
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+2) exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url
+3) Set immutable TARGET_URL from step 2.
+4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
+   If DEAD: exec: python3 scripts/remove-from-queue.py "<TARGET_URL>" "DEAD: preflight failed"; output STATUS=SKIPPED_DEAD; STOP.
+5) Keep context minimal (no large runbook reads):
+   - Do NOT read greenhouse_skill sections in normal flow; follow this task template directly.
+   - Read greenhouse_form_filler only immediately before first browser evaluate via:
+     exec: python3 scripts/context-manifest.py read greenhouse_form_filler --max-lines 360 --raw
+   - Do NOT use `python -c`, `cat`, `sed`, or any direct file read for form-filler.js; only the context-manifest command above is allowed.
+   - Read greenhouse_custom_answers / greenhouse_verify_code only if those branches are actually needed.
+   - After form-filler evaluate, continue directly to combobox/upload/submit; avoid extra large reads.
+   - For resume upload, use browser `action=upload` with top-level `paths` and `element` (or `ref`/`inputRef`) from fileUploadSelectors (do NOT click "Attach" first).
+6) Browser schema is strict:
+   - JS evaluate MUST use browser `action=act` with `request.kind=evaluate`.
+   - For multiline JS (form-filler/custom helpers), put code in `request.fn` (full function text from JS source).
+   - `request.fn` must be COMPLETE source (no placeholders like `...`, `[...]`, or `(truncated for brevity)`).
+   - For ALL `action=act` calls, kind/args must be inside `request={...}` (never top-level `kind/ref/text/paths`).
+   - `request` MUST be an object, never a JSON string (invalid: `request: "{...}"`).
+   - Canonical evaluate call shape: `{"action":"act","profile":"<ats-profile>","request":{"kind":"evaluate","fn":"<full_js_source>"}}`.
+   - If browser validation says `request: must be object` or shows `"request": "{...}"`, output STATUS=DEFERRED_TOOL_SCHEMA and STOP immediately (do not retry the same call).
+   - File upload is NOT an `act` request: use browser `action=upload` with top-level `paths` + (`element` or `ref` or `inputRef`).
+   - `action=evaluate` is invalid.
+   - Never pass targetId.
+   - If the same browser schema/validation error repeats twice, output STATUS=DEFERRED_TOOL_SCHEMA and STOP.
+   - If browser tool returns timeout/unreachable/control-service error: output STATUS=DEFERRED_BROWSER_TIMEOUT and STOP immediately.
+7) On confirmed submit only: exec: python3 scripts/mark-applied.py "<TARGET_URL>" "<Company>" "<Title>"
+8) Terminal outcomes allowed: SUBMITTED / SKIPPED / DEFERRED. After one terminal outcome, STOP run.
+FINALLY (even on error): exec: python3 scripts/subagent-lock.py unlock apply
 
 After spawning, write guardrail log once:
-`exec: python3 scripts/log-orchestrator-cycle.py --ashby SKIPPED_MODE --greenhouse <SPAWNED|SKIPPED_LOCKED|SKIPPED_EMPTY|ERROR|UNKNOWN> --lever SKIPPED_MODE --runid-ashby "" --runid-greenhouse "<...>" --runid-lever ""`
+exec: python3 scripts/log-orchestrator-cycle.py --ashby SKIPPED_NOT_CHOSEN --greenhouse SPAWNED --lever SKIPPED_NOT_CHOSEN --runid-greenhouse "<runid>"
 
-Return compact ATS lines only (SPAWNED/SKIPPED/ERROR)."""
+ABSOLUTE RULES:
+- SPAWN EXACTLY 1 GREENHOUSE SUBAGENT PER CYCLE, then STOP.
+- Subagent must use only exec + browser + process during apply runs.
+- Subagent must not call queue-summary more than once per run.
+- Never read form-filler.js via `python -c`, `cat`, `sed`, `awk`, or `head`; only `python3 scripts/context-manifest.py read <*_form_filler> ... --raw` is allowed.
+- Subagent must NEVER run `openclaw` commands of any kind during apply runs (especially `openclaw gateway *`).
+- NEVER run any command matching "openclaw gateway*".
+- NEVER read job-queue.md, dedup-index.md, or job-tracker.md into context."""
 
 
 def set_mode_on_file(path: str, mode: str, solo: bool) -> None:

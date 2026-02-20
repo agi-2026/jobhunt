@@ -7,6 +7,22 @@ description: Ashby ATS application agent. Fills toggle buttons, combobox dropdow
 
 ## Browser Profile
 Always use `profile="ashby"` for ALL browser actions (snapshot, navigate, act, upload).
+Never pass `targetId` in browser actions. Ignore `targetId` values returned by browser tools.
+Browser tool schema reminder (CRITICAL):
+- JS execution must use `action="act"` with nested `request.kind="evaluate"`.
+- For ALL `action="act"` calls, put click/type/evaluate params inside `request={...}`.
+- File upload uses `action="upload"` with top-level `paths` and `element|ref|inputRef` (not `request.kind="upload"`).
+- `action="evaluate"` is invalid and will fail.
+- Top-level `kind/ref/text/paths` with `action="act"` can fail with `request required`.
+- Canonical evaluate call shape: `{"action":"act","profile":"ashby","request":{"kind":"evaluate","fn":"<full_js_source>","timeoutMs":30000}}`
+
+## Metadata-First Retrieval (CRITICAL)
+Before reading large files:
+- `exec: python3 scripts/context-manifest.py list --profile apply-ashby --limit 20`
+- `exec: python3 scripts/tool-menu.py --profile ashby --json`
+- Use `exec: python3 scripts/context-manifest.py read <entry_id> --section "<heading>" --max-lines 180` for targeted reads.
+- In apply runs, use only `exec` + `browser` + `process` tools. Do not use `read`/`write`/`edit` tools.
+- Avoid direct full-file reads unless manifest access fails.
 
 ## Single-Job Guardrail (CRITICAL)
 - Work exactly **ONE URL per subagent run**.
@@ -14,6 +30,13 @@ Always use `profile="ashby"` for ALL browser actions (snapshot, navigate, act, u
 - Stay on that job until one terminal outcome: `SUBMITTED`, `SKIPPED`, or `DEFERRED`.
 - If terminal outcome is reached, stop the run and unlock.
 - Do not start a second application in the same subagent run.
+
+## Runtime Budget (CRITICAL)
+- Target completion time: 4-8 minutes per job.
+- If no terminal outcome after 8 minutes, set terminal outcome `DEFERRED` and STOP this run.
+- On browser infrastructure errors (`Can't reach the OpenClaw browser control service`, `browser connection lost`, `target closed`, `service unavailable`), stop retrying immediately, set terminal outcome `DEFERRED`, and STOP this run.
+- Never spend more than 90 seconds retrying infrastructure failures.
+- Snapshot budget: max 4 full snapshots per run (one pre-submit, one post-submit, plus targeted troubleshooting).
 
 ## Queue Selection
 ```
@@ -39,7 +62,8 @@ If mutual connections found, record them for manual follow-up notes.
 
 ### Phase 1: Navigate
 - `browser navigate <url> profile="ashby"`
-- Wait 5s (Ashby loads async). Take snapshot.
+- Wait 3-5s (Ashby loads async).
+- Do NOT take a full snapshot immediately after navigate.
 - Handle cookie consent / popups.
 - If 404 / expired page: skip, remove from queue, set terminal outcome `SKIPPED`, and STOP this run.
 - If `iframeDetected`: navigate to `iframeUrl` directly.
@@ -49,7 +73,11 @@ Copy resume first:
 ```
 exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
 ```
-Read `skills/apply-ashby/scripts/form-filler.js` and run via `browser act kind=evaluate script="..." timeoutMs=30000 profile="ashby"`.
+Read `skills/apply-ashby/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="ashby"`.
+Load canonical JS via manifest immediately before evaluate:
+```
+exec: python3 scripts/context-manifest.py read ashby_form_filler --max-lines 1400 --raw
+```
 When running evaluate:
 - Paste the **entire file contents** exactly (starts with `(function() {`).
 - Do **NOT** run `formFiller()` or any symbol-only snippet.
@@ -70,7 +98,7 @@ form-filler.js fills toggles with `simulateRealClick()` (full pointer event chai
 For EACH filled field with `method: "ashby-toggle-click"`:
 1. Take snapshot and verify the button shows correct visual state (selected/highlighted)
 2. If the toggle appears WRONG or unselected:
-   - Use **Playwright `click`** on the button's aria-ref: `browser act kind=click ref="<ref>" profile="ashby"`
+   - Use **Playwright `click`** on the button's aria-ref via `action="act"` and `request={"kind":"click","ref":"<ref>"}` with `profile="ashby"`
    - Playwright clicks go through the browser's real event pipeline and reliably update React state
    - Take one more snapshot to confirm
 3. Common toggles to verify: work authorization (Yes), visa sponsorship (Yes), gender/race (Decline)
@@ -96,9 +124,11 @@ If `customQuestions[]` is non-empty:
 - Generate concise, truthful answers from resume/profile context. Do not invent specific facts.
 - Build `window.__CUSTOM_ANSWERS__` as an array of `{ selector, value, type }` using entries from `customQuestions[]`.
 - Set answers payload:
-  `browser act kind=evaluate script="window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>" profile="ashby"`
-- Read `skills/apply-ashby/scripts/fill-custom-answers.js` and run it via:
-  `browser act kind=evaluate script="..." timeoutMs=30000 profile="ashby"`
+  `browser action="act" profile="ashby" request={"kind":"evaluate","fn":"window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>"}`
+- Load custom-answer helper only when needed:
+  `exec: python3 scripts/context-manifest.py read ashby_custom_answers --max-lines 260 --raw`
+  then run it via:
+  `browser action="act" profile="ashby" request={"kind":"evaluate","fn":"...","timeoutMs":30000}`
 - If required custom-question validation still fails after up to 2 correction attempts, set terminal outcome `DEFERRED`.
 
 ### Phase 7: Submit

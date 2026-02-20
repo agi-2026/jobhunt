@@ -1,10 +1,11 @@
 // detect-hcaptcha.js — Detect hCaptcha challenge and return metadata
-// Run via: browser act kind=evaluate fn="<this>" profile="lever"
+// Run via browser tool:
+// action="act", profile="lever", request={kind:"evaluate", fn:"<this>"}
 //
 // Returns JSON:
 // { detected: true/false, prompt: "...", gridSize: "3x3", iframeRect: {...} }
 
-(function() {
+function () {
   const result = {
     detected: false,
     prompt: null,
@@ -89,4 +90,4 @@
   }
 
   return JSON.stringify(result);
-})();
+}

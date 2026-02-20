@@ -7,6 +7,22 @@ description: Greenhouse ATS application agent. Handles MyGreenhouse autofill, Re
 
 ## Browser Profile
 Always use `profile="greenhouse"` for ALL browser actions (snapshot, navigate, act, upload).
+Never pass `targetId` in browser actions. Ignore `targetId` values returned by browser tools.
+Browser tool schema reminder (CRITICAL):
+- JS execution must use `action="act"` with nested `request.kind="evaluate"`.
+- For ALL `action="act"` calls, put click/type/evaluate params inside `request={...}`.
+- File upload uses `action="upload"` with top-level `paths` and `element|ref|inputRef` (not `request.kind="upload"`).
+- `action="evaluate"` is invalid and will fail.
+- Top-level `kind/ref/text/paths` with `action="act"` can fail with `request required`.
+- Canonical evaluate call shape: `{"action":"act","profile":"greenhouse","request":{"kind":"evaluate","fn":"<full_js_source>","timeoutMs":30000}}`
+
+## Metadata-First Retrieval (CRITICAL)
+Before reading large files:
+- `exec: python3 scripts/context-manifest.py list --profile apply-greenhouse --limit 20`
+- `exec: python3 scripts/tool-menu.py --profile greenhouse --json`
+- Use `exec: python3 scripts/context-manifest.py read <entry_id> --section "<heading>" --max-lines 180` for targeted reads.
+- In apply runs, use only `exec` + `browser` + `process` tools. Do not use `read`/`write`/`edit` tools.
+- Avoid direct full-file reads unless manifest access fails.
 
 ## Single-Job Guardrail (CRITICAL)
 - Work exactly **ONE URL per subagent run**.
@@ -14,6 +30,13 @@ Always use `profile="greenhouse"` for ALL browser actions (snapshot, navigate, a
 - Stay on that job until one terminal outcome: `SUBMITTED`, `SKIPPED`, or `DEFERRED`.
 - If terminal outcome is reached, stop the run and unlock.
 - Do not start a second application in the same subagent run.
+
+## Runtime Budget (CRITICAL)
+- Target completion time: 5-9 minutes per job (Greenhouse may include email verification).
+- If no terminal outcome after 9 minutes, set terminal outcome `DEFERRED` and STOP this run.
+- On browser infrastructure errors (`Can't reach the OpenClaw browser control service`, `browser connection lost`, `target closed`, `service unavailable`), stop retrying immediately, set terminal outcome `DEFERRED`, and STOP this run.
+- Never spend more than 90 seconds retrying infrastructure failures.
+- Snapshot budget: max 4 full snapshots per run (one pre-submit, one post-submit, plus targeted troubleshooting).
 
 ## Queue Selection
 ```
@@ -37,7 +60,8 @@ exec: python3 scripts/search-connections.py "<Company Name>"
 
 ### Phase 1: Navigate
 - `browser navigate <url> profile="greenhouse"`
-- Wait 5s. Take snapshot.
+- Wait 3-5s.
+- Do NOT take a full snapshot immediately after navigate.
 - Handle cookie/privacy popups.
 - If page is 404 / expired: remove from queue, set terminal outcome `SKIPPED`, and STOP this run.
 - If iframe (company career page wrapping `boards.greenhouse.io`): navigate to the direct Greenhouse URL.
@@ -57,7 +81,11 @@ Copy resume first:
 ```
 exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
 ```
-Read `skills/apply-greenhouse/scripts/form-filler.js` and run via `browser act kind=evaluate script="..." timeoutMs=30000 profile="greenhouse"`.
+Read `skills/apply-greenhouse/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="greenhouse"`.
+Load canonical JS via manifest immediately before evaluate:
+```
+exec: python3 scripts/context-manifest.py read greenhouse_form_filler --max-lines 1400 --raw
+```
 When running evaluate:
 - Paste the **entire file contents** exactly (starts with `(function() {`).
 - Do **NOT** run `formFiller()` or any symbol-only snippet.
@@ -85,31 +113,36 @@ Greenhouse uses button-based uploads ("Attach" button) with a hidden `input[type
 
 **Preferred method** — use `inputElement` from `fileUploadSelectors` (the hidden file input found by form-filler.js):
 ```
-browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000 profile="greenhouse"
+browser action="upload" profile="greenhouse" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
 ```
 **Fallback** — if `inputElement` is null (no hidden input found), use the button ref:
 ```
-browser act kind=upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] ref="<attach-button-ref>" timeoutMs=60000 profile="greenhouse"
+browser action="upload" profile="greenhouse" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] ref="<attach-button-ref>" timeoutMs=60000
 ```
 
 **After upload, ALWAYS run verify-upload.js** to re-dispatch React events:
+Load helper only when needed:
+`exec: python3 scripts/context-manifest.py read greenhouse_verify_upload --max-lines 220 --raw`
+Then run:
 ```
-browser act kind=evaluate script="<contents of scripts/verify-upload.js>" timeoutMs=10000 profile="greenhouse"
+browser action="act" profile="greenhouse" request={"kind":"evaluate","fn":"<contents of scripts/verify-upload.js>","timeoutMs":10000}
 ```
 Check the returned JSON: if `verified: false` or errors mention validation, take a snapshot and retry.
 
 If "file already uploaded" in skipped results: skip upload entirely.
 **NEVER click the Attach button with a regular click** — always use the upload action.
-Never upload by typing a file path into a button/text input. Use `kind=upload` only.
+Never upload by typing a file path into a button/text input. Use `action="upload"` only.
 
 ### Phase 5: Custom Questions
 If `customQuestions[]` is non-empty:
 - Generate concise, truthful answers from resume/profile context. Do not invent specific facts.
 - Build `window.__CUSTOM_ANSWERS__` as an array of `{ selector, value, type }` using entries from `customQuestions[]`.
 - Set answers payload:
-  `browser act kind=evaluate script="window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>" profile="greenhouse"`
-- Read `skills/apply-greenhouse/scripts/fill-custom-answers.js` and run it via:
-  `browser act kind=evaluate script="..." timeoutMs=30000 profile="greenhouse"`
+  `browser action="act" profile="greenhouse" request={"kind":"evaluate","fn":"window.__CUSTOM_ANSWERS__ = <JSON_ARRAY>"}`
+- Load custom-answer helper only when needed:
+  `exec: python3 scripts/context-manifest.py read greenhouse_custom_answers --max-lines 260 --raw`
+  then run it via:
+  `browser action="act" profile="greenhouse" request={"kind":"evaluate","fn":"...","timeoutMs":30000}`
 - If required custom-question validation still fails after up to 2 correction attempts, set terminal outcome `DEFERRED`.
 
 ### Phase 6: Submit
@@ -126,8 +159,9 @@ After submit, if "verification code" or "security code" text appears:
    ```
 3. Read the latest thread to extract the **8-character alphanumeric code**
 4. **Fill code using atomic script (DO NOT type characters one-by-one):**
-   a. Set the code: `browser act kind=evaluate script="window.__VERIFY_CODE = '<CODE>'" profile="greenhouse"`
-   b. Read `scripts/greenhouse-verify-code.js` and run via `browser act kind=evaluate script="..." profile="greenhouse"`
+   a. Set the code: `browser action="act" profile="greenhouse" request={"kind":"evaluate","fn":"window.__VERIFY_CODE = '<CODE>'"}`
+   b. Load helper via `exec: python3 scripts/context-manifest.py read greenhouse_verify_code --max-lines 220 --raw`
+      and run via `browser action="act" profile="greenhouse" request={"kind":"evaluate","fn":"..."}`
    c. Parse returned JSON — if `filled: true`, proceed. If `error`, fall back to step 4d.
    d. **Fallback only:** Take snapshot, find the FIRST verification code input box (small single-char inputs near "verification code" text at BOTTOM of page — NOT regular form fields at top), type code character-by-character into those specific inputs.
 5. Click Submit/Verify button

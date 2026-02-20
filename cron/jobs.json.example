@@ -17,7 +17,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "You are the SEARCH AGENT. AGENTS.md has your full instructions.\n\n**START:** exec: python3 scripts/read-memory.py hot\n\n## THIS SESSION \u2014 API-FIRST WORKFLOW\n1. Read search-rotation.md \u2014 pick DUE boards/queries\n2. Read company-watchlist.md \u2014 pick 2-3 DUE companies\n3. Run API search:\n- exec: python3 scripts/search-ashby-api.py --all --add\n- exec: python3 scripts/search-greenhouse-api.py --all --add\n- exec: python3 scripts/search-lever-api.py --all --add\n- exec: python3 scripts/search-vc-boards.py --all --add\n4. Brave API fallback: search, dedup-check, score, add\n5. Browser pass only for LinkedIn/YC/custom boards when needed\n\nCRITICAL:\n- Use exec scripts; do not read large queue/dedup files\n- NEVER apply to jobs in this agent",
-        "model": "openrouter/moonshotai/kimi-k2.5:nitro",
+        "model": "openrouter/arcee-ai/trinity-large-preview:free",
         "thinking": "low",
         "timeoutSeconds": 900
       },
@@ -69,7 +69,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "UNIFIED HEALTH + ANALYSIS CYCLE:\n\n1. exec: python3 scripts/health-check.py\n2. exec: python3 scripts/dynamic-scheduler.py\n3. exec: python3 scripts/analyze-logs.py --summary\n4. exec: python3 scripts/read-memory.py stats\n\nFor CRITICAL alerts (stuck agents, repeated failures, token issues):\n- WhatsApp immediately with issue + fix recommendation\n\nFor warnings or regressions:\n- Send concise digest with top findings + suggested fixes\n\nIf all OK and no schedule changes, respond silently.",
-        "model": "openrouter/moonshotai/kimi-k2.5:nitro",
+        "model": "openrouter/arcee-ai/trinity-large-preview:free",
         "timeoutSeconds": 180
       },
       "delivery": {

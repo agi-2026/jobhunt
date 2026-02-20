@@ -4,6 +4,8 @@
 Stops automatically after TARGET_STREAK successful apply marks in a row.
 """
 
+import argparse
+import fcntl
 import glob
 import hashlib
 import json
@@ -22,17 +24,19 @@ LOG_DIR = os.path.join(WORKSPACE, "logs")
 STATE_PATH = os.path.join(LOG_DIR, "apply-watchdog-state.json")
 RUN_LOG_PATH = os.path.join(LOG_DIR, "apply-watchdog.log")
 GUARD_LOG_PATH = os.path.join(LOG_DIR, "subagent-guardrails.jsonl")
+INSTANCE_LOCK_PATH = os.path.join(LOG_DIR, ".apply-watchdog.lock")
 SESSION_DIR = os.path.expanduser("~/.openclaw/agents/main/sessions")
-SESSION_GLOBS = ("*.jsonl", "*.jsonl.deleted.*")
+# Track active transcripts only; deleted snapshots can cause duplicate counting.
+SESSION_GLOBS = ("*.jsonl",)
 
 ORCH_ID = "b2a0f25e-bd8a-43de-bf77-68802c7c9a0f"
-TARGET_STREAK = 5
+TARGET_STREAK = 10
 POLL_SECONDS = 30
 TRIGGER_SECONDS = 120
 SESSION_TRACK_WINDOW_SECONDS = 18 * 3600
 MAX_TRACKED_SESSION_FILES = 300
 GATEWAY_HOST = "127.0.0.1"
-GATEWAY_PORT = 18790
+GATEWAY_PORT = 18789
 SUCCESS_MARKER = "QUEUE: Marked COMPLETED"
 FAIL_MARKER_RE = re.compile(r"\bSTATUS=(DEFERRED|SKIPPED)\b")
 MARK_APPLIED_REFUSAL = "ERROR: Refusing to mark APPLIED"
@@ -52,6 +56,12 @@ CANONICAL_FORM_FILLER_ABSOLUTE = {
     os.path.normpath(os.path.join(WORKSPACE, rel))
     for rel in CANONICAL_FORM_FILLER_RELATIVE
 }
+
+SUBAGENT_RUNS_PATH = os.path.expanduser("~/.openclaw/subagents/runs.json")
+SESSION_STORE_PATH = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
+ORPHAN_GRACE_SECONDS = 90
+RUN_HEARTBEAT_TIMEOUT_SECONDS = 180
+RUN_STALE_SECONDS = 20 * 60
 
 
 def now_iso() -> str:
@@ -120,11 +130,36 @@ def run_cmd(argv: list[str], cwd: str | None = None, timeout: int = 90) -> tuple
         return 127, "", str(e)
 
 
-def gateway_ok() -> bool:
+def _load_openclaw_config() -> dict:
+    path = os.path.expanduser("~/.openclaw/openclaw.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def cron_scheduler_enabled() -> bool:
+    cfg = _load_openclaw_config()
+    cron = cfg.get("cron")
+    return isinstance(cron, dict) and bool(cron.get("enabled", False))
+
+
+def cron_daemon_running() -> bool:
+    # Modern OpenClaw runs cron scheduling inside the gateway process.
+    if gateway_ok(GATEWAY_HOST, GATEWAY_PORT):
+        return True
+    # Backward-compat fallback for legacy standalone cron daemon setups.
+    rc, out, _ = run_cmd(["pgrep", "-f", "openclaw-cron"], timeout=5)
+    return rc == 0 and bool((out or "").strip())
+
+
+def gateway_ok(host: str, port: int) -> bool:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1.5)
     try:
-        s.connect((GATEWAY_HOST, GATEWAY_PORT))
+        s.connect((host, port))
         return True
     except OSError:
         return False
@@ -132,12 +167,195 @@ def gateway_ok() -> bool:
         s.close()
 
 
-def recover_gateway_if_needed() -> None:
-    if gateway_ok():
+def recover_gateway_if_needed(host: str, port: int) -> None:
+    if gateway_ok(host, port):
         return
-    log("Gateway not reachable on 127.0.0.1:18790; restarting gateway.")
+    log(f"Gateway not reachable on {host}:{port}; restarting gateway.")
     rc, out, err = run_cmd(["pnpm", "-s", "openclaw", "gateway", "restart"], cwd=OPENCLAW_DIR, timeout=90)
     log(f"gateway restart rc={rc} out={out or '-'} err={err or '-'}")
+
+
+def ensure_single_instance() -> object | None:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    lockf = open(INSTANCE_LOCK_PATH, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    lockf.write(str(os.getpid()))
+    lockf.flush()
+    return lockf
+
+
+def _load_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _last_session_heartbeat_sec(run: dict, session_store: dict, now_sec: float) -> float | None:
+    child_key = str(run.get("childSessionKey") or "")
+    if not child_key:
+        return None
+
+    entry = session_store.get(child_key) if isinstance(session_store, dict) else None
+    if not isinstance(entry, dict):
+        return None
+
+    candidates: list[float] = []
+    updated_ms = entry.get("updatedAt")
+    if isinstance(updated_ms, (int, float)):
+        candidates.append(float(updated_ms) / 1000.0)
+
+    session_id = entry.get("sessionId")
+    if isinstance(session_id, str) and session_id:
+        transcript = os.path.join(SESSION_DIR, f"{session_id}.jsonl")
+        if os.path.exists(transcript):
+            try:
+                candidates.append(float(os.path.getmtime(transcript)))
+            except OSError:
+                pass
+
+    if not candidates:
+        return None
+    return min(now_sec, max(candidates))
+
+
+def cleanup_orphan_runs() -> int:
+    runs_data = _load_json(SUBAGENT_RUNS_PATH)
+    runs = runs_data.get("runs", {})
+    if not isinstance(runs, dict):
+        return 0
+
+    sessions = _load_json(SESSION_STORE_PATH)
+    now_sec = time.time()
+    now_ms = int(now_sec * 1000)
+    touched = False
+    cleaned = 0
+
+    for run in runs.values():
+        if not isinstance(run, dict):
+            continue
+        if run.get("endedAt"):
+            continue
+
+        label = str(run.get("label", "")).lower()
+        task = str(run.get("task", "")).lower()
+        if not (label.startswith("apply-") or "subagent-lock.py lock apply" in task):
+            continue
+
+        started_ms = run.get("startedAt") or run.get("createdAt") or 0
+        try:
+            run_age_sec = max(0.0, now_sec - float(started_ms) / 1000.0)
+        except (TypeError, ValueError):
+            run_age_sec = 0.0
+
+        cleanup_reason = ""
+        if run_age_sec > RUN_STALE_SECONDS:
+            cleanup_reason = "orphan-run-stale-ttl"
+        else:
+            last_heartbeat = _last_session_heartbeat_sec(run, sessions, now_sec)
+            if last_heartbeat is None:
+                if run_age_sec > ORPHAN_GRACE_SECONDS:
+                    cleanup_reason = "orphan-missing-session-heartbeat"
+            else:
+                heartbeat_age = max(0.0, now_sec - last_heartbeat)
+                if run_age_sec > ORPHAN_GRACE_SECONDS and heartbeat_age > RUN_HEARTBEAT_TIMEOUT_SECONDS:
+                    cleanup_reason = f"orphan-heartbeat-timeout-{int(heartbeat_age)}s"
+
+        if cleanup_reason:
+            run["endedAt"] = now_ms
+            run["outcome"] = {"status": "error", "error": cleanup_reason}
+            run["cleanupHandled"] = True
+            run["cleanupCompletedAt"] = now_ms
+            cleaned += 1
+            touched = True
+
+    if touched:
+        try:
+            with open(SUBAGENT_RUNS_PATH, "w", encoding="utf-8") as f:
+                json.dump(runs_data, f, indent=2)
+                f.write("\n")
+        except OSError:
+            return 0
+
+        # Also trigger lock self-heal path.
+        run_cmd(["python3", "scripts/subagent-lock.py", "check", "apply"], cwd=WORKSPACE, timeout=30)
+    return cleaned
+
+
+def _session_id_for_child_key(session_store: dict, child_session_key: str) -> str:
+    if not isinstance(session_store, dict) or not child_session_key:
+        return ""
+    entry = session_store.get(child_session_key)
+    if not isinstance(entry, dict):
+        return ""
+    sid = entry.get("sessionId")
+    return str(sid) if isinstance(sid, str) else ""
+
+
+def terminate_subagent_run_for_session(session_id: str, reason: str) -> bool:
+    """Force-end an active apply subagent run for a specific session id.
+
+    This is used as a hard guardrail when we detect forbidden commands in a
+    subagent transcript.
+    """
+    if not session_id:
+        return False
+
+    runs_data = _load_json(SUBAGENT_RUNS_PATH)
+    runs = runs_data.get("runs", {})
+    if not isinstance(runs, dict):
+        return False
+
+    session_store = _load_json(SESSION_STORE_PATH)
+    now_ms = int(time.time() * 1000)
+    touched = False
+    terminated_run_ids: list[str] = []
+
+    for run_id, run in runs.items():
+        if not isinstance(run, dict):
+            continue
+        if run.get("endedAt"):
+            continue
+
+        label = str(run.get("label", "")).lower()
+        task = str(run.get("task", "")).lower()
+        if not (label.startswith("apply-") or "subagent-lock.py lock apply" in task):
+            continue
+
+        child_key = str(run.get("childSessionKey") or "")
+        child_session_id = _session_id_for_child_key(session_store, child_key)
+        if child_session_id != session_id:
+            continue
+
+        run["endedAt"] = now_ms
+        run["outcome"] = {"status": "error", "error": reason[:600]}
+        run["cleanupHandled"] = True
+        run["cleanupCompletedAt"] = now_ms
+        touched = True
+        terminated_run_ids.append(str(run_id))
+
+    if not touched:
+        return False
+
+    try:
+        with open(SUBAGENT_RUNS_PATH, "w", encoding="utf-8") as f:
+            json.dump(runs_data, f, indent=2)
+            f.write("\n")
+    except OSError:
+        return False
+
+    # Release global apply lock so orchestrator is not starved.
+    run_cmd(["python3", "scripts/subagent-lock.py", "unlock", "apply"], cwd=WORKSPACE, timeout=30)
+    log(
+        "Force-terminated subagent run(s) for forbidden command "
+        f"session={session_id} runIds={','.join(terminated_run_ids)}"
+    )
+    return True
 
 
 def _extract_message_payload(obj: dict) -> tuple[str, str, list[dict]]:
@@ -236,6 +454,16 @@ def _extract_browser_evaluate_script(arguments: object) -> str:
     if isinstance(fn, str):
         return fn
     return ""
+
+
+def _browser_request_is_stringified(arguments: object) -> bool:
+    if not isinstance(arguments, dict):
+        return False
+    request = arguments.get("request")
+    if not isinstance(request, str):
+        return False
+    payload = request.strip().lower()
+    return "\"kind\"" in payload and "evaluate" in payload
 
 
 def _append_guard_entry(entry: dict) -> None:
@@ -450,6 +678,10 @@ def process_new_session_events(state: dict) -> None:
                                         rule="NON_CANONICAL_FORM_FILLER_PATH",
                                         detail=command,
                                     )
+                                    terminate_subagent_run_for_session(
+                                        session_id,
+                                        f"NON_CANONICAL_FORM_FILLER_PATH: {command[:300]}",
+                                    )
 
                             if is_subagent and FORBIDDEN_GATEWAY_CMD_RE.search(command):
                                 _record_guard_violation(
@@ -460,9 +692,27 @@ def process_new_session_events(state: dict) -> None:
                                     rule="FORBIDDEN_GATEWAY_COMMAND",
                                     detail=command,
                                 )
+                                terminate_subagent_run_for_session(
+                                    session_id,
+                                    f"FORBIDDEN_GATEWAY_COMMAND: {command[:300]}",
+                                )
                             continue
 
                         if tool_name == "browser" and is_subagent:
+                            if _browser_request_is_stringified(arguments):
+                                _record_guard_violation(
+                                    state,
+                                    seen_guard_violations,
+                                    session_id=session_id,
+                                    session_file=path,
+                                    rule="BROWSER_REQUEST_STRINGIFIED",
+                                    detail='browser request was a JSON string (expected object request={...})',
+                                )
+                                terminate_subagent_run_for_session(
+                                    session_id,
+                                    "BROWSER_REQUEST_STRINGIFIED: request must be object",
+                                )
+                                continue
                             script = _extract_browser_evaluate_script(arguments)
                             if script and _looks_like_form_filler_script(script):
                                 if not bool(guard.get("canonical_form_filler_seen")):
@@ -490,9 +740,21 @@ def process_new_session_events(state: dict) -> None:
         state["session_guard"] = {k: v for k, v in survivors}
 
 
-def trigger_orchestrator(state: dict) -> None:
+def trigger_orchestrator(state: dict, orchestrator_id: str, trigger_seconds: int) -> None:
+    # Use direct trigger fallback when cron is configured but daemon is not running.
+    scheduler_enabled = cron_scheduler_enabled()
+    daemon_running = cron_daemon_running()
+    if scheduler_enabled and daemon_running:
+        return
+
     now_ts = int(time.time())
-    if now_ts - int(state.get("last_trigger_ts", 0)) < TRIGGER_SECONDS:
+    if scheduler_enabled and not daemon_running:
+        last_warn = int(state.get("last_cron_warn_ts", 0))
+        if now_ts - last_warn >= 300:
+            log("Cron is enabled but daemon is not running; using direct trigger fallback.")
+            state["last_cron_warn_ts"] = now_ts
+
+    if now_ts - int(state.get("last_trigger_ts", 0)) < trigger_seconds:
         return
     rc, out, err = run_cmd(
         [
@@ -501,7 +763,7 @@ def trigger_orchestrator(state: dict) -> None:
             "openclaw",
             "cron",
             "run",
-            ORCH_ID,
+            orchestrator_id,
             "--timeout",
             "120000",
         ],
@@ -509,27 +771,76 @@ def trigger_orchestrator(state: dict) -> None:
         timeout=150,
     )
     state["last_trigger_ts"] = now_ts
-    log(f"orchestrator trigger rc={rc} out={out or '-'} err={err or '-'}")
+    out_short = (out or "-").replace("\n", " ")[:280]
+    err_short = (err or "-").replace("\n", " ")[:280]
+    log(f"orchestrator trigger rc={rc} out={out_short} err={err_short}")
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Run apply watchdog until streak target is reached.")
+    p.add_argument("--target-streak", type=int, default=TARGET_STREAK)
+    p.add_argument("--poll-seconds", type=int, default=POLL_SECONDS)
+    p.add_argument("--trigger-seconds", type=int, default=TRIGGER_SECONDS)
+    p.add_argument("--gateway-host", default=GATEWAY_HOST)
+    p.add_argument("--gateway-port", type=int, default=GATEWAY_PORT)
+    p.add_argument("--orchestrator-id", default=ORCH_ID)
+    p.add_argument("--reset-state", action="store_true", help="Reset persisted streak state before run.")
+    return p.parse_args()
 
 
 def main() -> int:
+    args = parse_args()
+    if args.target_streak <= 0:
+        print("ERROR: --target-streak must be > 0")
+        return 2
+    if args.poll_seconds <= 0:
+        print("ERROR: --poll-seconds must be > 0")
+        return 2
+    if args.trigger_seconds <= 0:
+        print("ERROR: --trigger-seconds must be > 0")
+        return 2
+
+    lockf = ensure_single_instance()
+    if lockf is None:
+        print("ERROR: apply-watchdog is already running (instance lock held).")
+        return 2
+
     state = load_state()
+    if args.reset_state:
+        now_ts = int(time.time())
+        state = {
+            "started_at": now_iso(),
+            "started_epoch": now_ts,
+            "streak": 0,
+            "success_total": 0,
+            "last_trigger_ts": 0,
+            "session_offsets": {},
+            "session_offsets_initialized": False,
+            "counted_success_sessions": [],
+            "session_guard": {},
+            "guard_violation_ids": [],
+            "guard_violation_total": 0,
+        }
+
     try:
         log(
             "Watchdog started. "
-            f"target_streak={TARGET_STREAK} started_at={state.get('started_at')} "
-            f"current_streak={state.get('streak', 0)}"
+            f"target_streak={args.target_streak} started_at={state.get('started_at')} "
+            f"current_streak={state.get('streak', 0)} gateway={args.gateway_host}:{args.gateway_port}"
         )
         save_state(state)
 
-        while int(state.get("streak", 0)) < TARGET_STREAK:
-            recover_gateway_if_needed()
+        while int(state.get("streak", 0)) < args.target_streak:
+            recover_gateway_if_needed(args.gateway_host, args.gateway_port)
+            cleaned = cleanup_orphan_runs()
+            if cleaned:
+                log(f"Cleaned {cleaned} orphan subagent run(s).")
             process_new_session_events(state)
-            trigger_orchestrator(state)
+            trigger_orchestrator(state, args.orchestrator_id, args.trigger_seconds)
             save_state(state)
-            if int(state.get("streak", 0)) >= TARGET_STREAK:
+            if int(state.get("streak", 0)) >= args.target_streak:
                 break
-            time.sleep(POLL_SECONDS)
+            time.sleep(args.poll_seconds)
 
         log(
             "Target streak reached. "
