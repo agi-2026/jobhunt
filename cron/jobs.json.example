@@ -43,7 +43,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "You are the APPLICATION ORCHESTRATOR.\n\nRun this flow only:\n1) exec: python3 scripts/orchestrator-dispatch.py --json\n2) exec: python3 scripts/batch-preflight.py --all --remove --top 12 --timeout 90\n3) For each ATS in [ashby, greenhouse, lever], if ready, spawn ONE subagent in parallel via sessions_spawn.\n\nSpawn requirements:\n- unique label: apply-<ats>-<unix_ms>-<rand4>\n- retry once on \"label already in use\"\n- runTimeoutSeconds: ashby=900, greenhouse=900, lever=600\n- thinking: low\n- cleanup: keep\n\nSubagent task contract (all ATS):\n- lock first, unlock always (scripts/subagent-lock.py)\n- use ATS SKILL.md exactly\n- STRICT browser mode: NEVER action=open, ALWAYS navigate, NEVER pass targetId\n- use queue-summary output directly, process exactly TOP 1 job this run\n- if blocked by captcha/verification, keep pending and continue\n\nAfter spawning, write guardrail log once:\nexec: python3 scripts/log-orchestrator-cycle.py --ashby <...> --greenhouse <...> --lever <...> --runid-ashby \"<...>\" --runid-greenhouse \"<...>\" --runid-lever \"<...>\"\n\nReturn compact ATS lines only (SPAWNED/SKIPPED/ERROR).",
-        "model": "google/gemini-3.1-pro-preview",
+        "model": "openrouter/google/gemini-3-pro-preview",
         "thinking": "low",
         "timeoutSeconds": 180
       },
