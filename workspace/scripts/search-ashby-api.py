@@ -202,23 +202,52 @@ def recency_score(job):
         return 30
 
 def match_score(title):
-    """Score based on title match to preferences."""
-    title_lower = title.lower()
-    exact = ['research scientist', 'research engineer', 'founding engineer', 'ai team lead']
-    strong = ['ml engineer', 'machine learning engineer', 'ai engineer', 'applied scientist',
-              'post-training', 'pre-training', 'rlhf', 'alignment', 'member of technical staff']
-    partial = ['software engineer', 'data scientist', 'inference engineer']
+    """Keyword fallback scorer — used only when Claude is unavailable.
+    Mirrors the logic in claude_scorer._fallback_score.
+    Returns 0-100; Claude replaces this with semantic scores when available."""
+    t = title.lower()
 
-    for kw in exact:
-        if kw in title_lower:
-            return 100
-    for kw in strong:
-        if kw in title_lower:
-            return 80
-    for kw in partial:
-        if kw in title_lower:
-            return 60
-    return 40
+    # Auto-skip tier — will be filtered by Claude anyway, but catch obvious ones
+    skip = ['mechanical engineer', 'electrical engineer', 'hardware engineer',
+            'solutions engineer', 'sales engineer', 'gtm engineer',
+            'data engineer', 'full stack', 'fullstack', 'full-stack',
+            'frontend engineer', 'fleet safety', 'product manager', 'program manager']
+    if any(kw in t for kw in skip):
+        return 10
+
+    # Perfect tier
+    perfect = ['ml engineer', 'machine learning engineer', 'ai engineer',
+               'llm engineer', 'agent engineer', 'research scientist',
+               'research engineer', 'applied research', 'forward deployed',
+               'post-training', 'rlhf', 'alignment engineer', 'evals engineer',
+               'member of technical staff', 'founding engineer', 'founding ml',
+               'founding ai', 'applied ml engineer']
+    if any(kw in t for kw in perfect):
+        score = 92
+        if 'senior staff' in t: score -= 12
+        if 'principal' in t: score -= 8
+        if any(yr in t for yr in ['6+ year', '7+ year', '8+ year']): score -= 25
+        return max(30, score)
+
+    # Good tier — SWE with explicit AI qualifier
+    if 'software engineer' in t and any(q in t for q in ['ai', 'llm', 'agent', 'ml', 'model']):
+        return 78
+
+    # Good tier — other
+    good = ['applied scientist', 'ml infrastructure', 'ml platform', 'inference engineer',
+            'model engineer', 'applied scientist']
+    if any(kw in t for kw in good):
+        return 74
+
+    # Weak but valid
+    if 'software engineer' in t:
+        return 48
+    if 'data scientist' in t:
+        return 38
+    if 'backend engineer' in t or 'platform engineer' in t:
+        return 42
+
+    return 42
 
 def score_job(job, slug):
     """Calculate total score for a job."""
@@ -297,37 +326,37 @@ def search_company(slug, auto_add=False):
     if not relevant:
         return 0, 0
 
-    # Batch score with Gemini for semantic relevance
-    from gemini_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
-    gemini_input = [{'title': j.get('title', ''), 'company': company_name,
+    # Batch score with Claude for semantic relevance
+    from claude_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
+    claude_input = [{'title': j.get('title', ''), 'company': company_name,
                      'department': j.get('department', ''), 'team': j.get('team', '')}
                     for j in relevant]
-    gemini_scores = batch_score_jobs(gemini_input)
+    claude_scores = batch_score_jobs(claude_input)
 
     new_count = 0
     dup_count = 0
     filtered_count = 0
 
-    for job, gscore in zip(relevant, gemini_scores):
+    for job, cscore in zip(relevant, claude_scores):
         url = job.get('jobUrl', '')
         title = job.get('title', '')
         location = job.get('location', 'Unknown')
         if job.get('isRemote'):
             location = f"{location} (Remote)" if location else "Remote"
 
-        # Filter by Gemini relevance
-        if not gscore['relevant']:
+        # Filter by Claude relevance
+        if not cscore['relevant']:
             filtered_count += 1
-            print(f'  FILTERED [{gscore["score"]}] {company_name} — {title} | {gscore["reason"]}')
+            print(f'  FILTERED [{cscore["score"]}] {company_name} — {title} | {cscore["reason"]}')
             continue
 
-        # Score using Gemini match score
+        # Score using Claude match score
         r = recency_score(job)
         s = 30
         c = COMPANY_INFO.get(slug, {}).get('score', 70)
-        m = gscore['score']
+        m = cscore['score']
         total = r + s + c + m
-        breakdown = f'recency={r} salary={s} company={c} match={m}(gemini:{gscore["reason"]})'
+        breakdown = f'recency={r} salary={s} company={c} match={m}(claude:{cscore["reason"]})'
 
         if check_dedup(url):
             dup_count += 1
@@ -350,7 +379,7 @@ def search_company(slug, auto_add=False):
                 'h1b': info.get('h1b', 'Unknown'),
                 'source': 'Ashby API',
                 'scoreBreakdown': breakdown,
-                'whyMatch': gscore['reason'],
+                'whyMatch': cscore['reason'],
                 'autoApply': auto_apply
             }
             result = add_to_queue(entry)
@@ -359,7 +388,7 @@ def search_company(slug, auto_add=False):
             print(f'  [{total}] {company_name} — {title} ({location}) {url}')
 
     if filtered_count:
-        print(f'  (Gemini filtered {filtered_count} irrelevant jobs)')
+        print(f'  (Claude filtered {filtered_count} irrelevant jobs)')
 
     return new_count, dup_count
 

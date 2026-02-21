@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Re-score pending queue jobs with Gemini to find and remove irrelevant ones.
+Re-score pending queue jobs with Claude to find and remove irrelevant ones.
 
 Usage:
   python3 scripts/rescore-queue.py              # Dry run — show what would be removed
@@ -14,7 +14,7 @@ import re
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
-from gemini_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
+from claude_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
 
 REMOVE_SCRIPT = os.path.join(SCRIPT_DIR, 'remove-from-queue.py')
 
@@ -28,17 +28,13 @@ def get_queue_jobs():
     )
     jobs = []
     for line in result.stdout.strip().split('\n'):
-        # Format: [320] Company — Title | Location | Salary | URL
-        # Split on " — " first to get company, then split rest on " | "
         m = re.match(r'^\[(\d+)\]\s+(.+?)\s+—\s+(.+)$', line)
         if not m:
             continue
         score = int(m.group(1))
         company = m.group(2).strip()
         rest = m.group(3).strip()
-        # Split rest by " | " — last part is URL, everything before is title/location/salary
         parts = [p.strip() for p in rest.split(' | ')]
-        # Find URL (last http part)
         url = ''
         for i in range(len(parts) - 1, -1, -1):
             if parts[i].startswith('http'):
@@ -68,12 +64,10 @@ def main():
         print('No jobs to re-score')
         return
 
-    # Batch score with Gemini
-    print(f'Scoring {len(jobs)} jobs with Gemini...')
-    gemini_input = [{'title': j['title'], 'company': j['company']} for j in jobs]
-    scores = batch_score_jobs(gemini_input)
+    print(f'Scoring {len(jobs)} jobs with Claude...')
+    claude_input = [{'title': j['title'], 'company': j['company']} for j in jobs]
+    scores = batch_score_jobs(claude_input)
 
-    # Find irrelevant jobs
     irrelevant = []
     for job, gscore in zip(jobs, scores):
         if not gscore['relevant']:
@@ -87,7 +81,7 @@ def main():
         if remove:
             try:
                 result = subprocess.run(
-                    ['python3', REMOVE_SCRIPT, job['url'], '--reason', f"Gemini:{gscore['reason']}"],
+                    ['python3', REMOVE_SCRIPT, job['url'], '--reason', f"Claude:{gscore['reason']}"],
                     capture_output=True, text=True, timeout=10
                 )
                 if result.returncode != 0:

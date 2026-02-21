@@ -45,10 +45,9 @@ def get_hot_memory():
         if stage not in ('Stage', '---', 'Date', 'Name'):
             pipeline[stage] = int(m.group(2))
 
-    # Get queue stats
+    # Get queue stats — count PENDING status entries in queue
     queue = read_file(QUEUE_PATH)
-    pending_m = re.search(r'Pending:\s*(\d+)', queue)
-    pending_count = int(pending_m.group(1)) if pending_m else 0
+    pending_count = queue.count('**Status:** PENDING')
 
     # Get today's session highlights
     session_file = os.path.join(MEMORY_DIR, f'session-{today}.md')

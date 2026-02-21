@@ -208,11 +208,11 @@ def _provider_recent_ok(jobs, required_job_names, now_ms, window_ms=6 * 3600 * 1
 
 
 def get_auth_health():
-    """Check active runtime auth for providers currently used by jobs (Google/OpenRouter)."""
+    """Check active runtime auth for providers currently used by jobs (Anthropic/OpenRouter)."""
     alerts = []
     auth_profiles_path = os.path.join(OPENCLAW_DIR, 'agents', 'main', 'agent', 'auth-profiles.json')
     provider_env_keys = {
-        "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        "anthropic": ("ANTHROPIC_API_KEY",),
         "openrouter": ("OPENROUTER_API_KEY",),
     }
 

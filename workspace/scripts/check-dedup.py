@@ -51,12 +51,16 @@ def check_one(url, company='', title='', urls=None, company_titles=None):
         urls, company_titles = load_dedup_index()
 
     # Check URL
-    url_lower = url.lower().strip()
-    # Also try without trailing slash
-    url_variants = [url_lower, url_lower.rstrip('/'), url_lower + '/']
+    url_lower = url.lower().strip().rstrip('/')
+    # Also try common suffix variants (Ashby adds /application, Greenhouse adds /jobs/...)
+    url_variants = [url_lower, url_lower + '/', url_lower + '/application']
     for v in url_variants:
         if v in urls:
             return f"DUPLICATE {urls[v]}"
+    # Check if any dedup URL is a prefix-extension of this URL (e.g., dedup has /application suffix)
+    for dedup_url, dedup_line in urls.items():
+        if dedup_url.startswith(url_lower + '/'):
+            return f"DUPLICATE {dedup_line}"
 
     # Check company+title
     if company and title:

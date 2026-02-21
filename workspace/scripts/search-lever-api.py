@@ -217,18 +217,18 @@ def search_company(slug, auto_add=False):
     if not relevant:
         return 0, 0
 
-    # Batch score with Gemini for semantic relevance
-    from gemini_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
-    gemini_input = [{'title': j.get('text', ''), 'company': company_name,
+    # Batch score with Claude for semantic relevance
+    from claude_scorer import batch_score_jobs, RELEVANCE_THRESHOLD
+    claude_input = [{'title': j.get('text', ''), 'company': company_name,
                      'team': j.get('categories', {}).get('team', '')}
                     for j in relevant]
-    gemini_scores = batch_score_jobs(gemini_input)
+    claude_scores = batch_score_jobs(claude_input)
 
     new_count = 0
     dup_count = 0
     filtered_count = 0
 
-    for job, gscore in zip(relevant, gemini_scores):
+    for job, cscore in zip(relevant, claude_scores):
         url = job.get('hostedUrl', '')
         title = job.get('text', '')
         location = job.get('categories', {}).get('location', 'Unknown')
@@ -236,19 +236,19 @@ def search_company(slug, auto_add=False):
         if workplace == 'remote':
             location = f"{location} (Remote)" if location else "Remote"
 
-        # Filter by Gemini relevance
-        if not gscore['relevant']:
+        # Filter by Claude relevance
+        if not cscore['relevant']:
             filtered_count += 1
-            print(f'  FILTERED [{gscore["score"]}] {company_name} — {title} | {gscore["reason"]}')
+            print(f'  FILTERED [{cscore["score"]}] {company_name} — {title} | {cscore["reason"]}')
             continue
 
-        # Score using Gemini match score
+        # Score using Claude match score
         r = recency_score(job)
         s = 30
         c = COMPANY_INFO.get(slug, {}).get('score', 70)
-        m = gscore['score']
+        m = cscore['score']
         total = r + s + c + m
-        breakdown = f'recency={r} salary={s} company={c} match={m}(gemini:{gscore["reason"]})'
+        breakdown = f'recency={r} salary={s} company={c} match={m}(claude:{cscore["reason"]})'
 
         if check_dedup(url):
             dup_count += 1
@@ -270,7 +270,7 @@ def search_company(slug, auto_add=False):
                 'h1b': info.get('h1b', 'Unknown'),
                 'source': 'Lever API',
                 'scoreBreakdown': breakdown,
-                'whyMatch': gscore['reason'],
+                'whyMatch': cscore['reason'],
                 'autoApply': True
             }
             result = add_to_queue(entry)
@@ -279,7 +279,7 @@ def search_company(slug, auto_add=False):
             print(f'  [{total}] {company_name} — {title} ({location}) {url}')
 
     if filtered_count:
-        print(f'  (Gemini filtered {filtered_count} irrelevant jobs)')
+        print(f'  (Claude filtered {filtered_count} irrelevant jobs)')
 
     return new_count, dup_count
 

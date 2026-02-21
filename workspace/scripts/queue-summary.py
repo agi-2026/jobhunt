@@ -29,8 +29,21 @@ LOCK_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file
 # Companies that should never appear in --actionable output (Howard applies manually)
 NO_AUTO_COMPANIES = {'openai', 'databricks', 'pinterest'}
 
+def _load_skip_companies():
+    """Load company names from skip-companies.json for NO-AUTO filtering."""
+    import json
+    skip_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'skip-companies.json')
+    try:
+        with open(skip_path, 'r') as f:
+            data = json.load(f)
+        return {c['name'].lower() for c in data.get('companies', [])}
+    except Exception:
+        return set()
+
 def parse_queue_compact():
-    return read_queue_sections(QUEUE_PATH, LOCK_PATH, no_auto_companies=NO_AUTO_COMPANIES)
+    skip_names = _load_skip_companies()
+    combined = NO_AUTO_COMPANIES | skip_names
+    return read_queue_sections(QUEUE_PATH, LOCK_PATH, no_auto_companies=combined)
 
 def shorten_url(url, max_len=40):
     url = url.replace('https://', '').replace('http://', '').replace('www.', '')
