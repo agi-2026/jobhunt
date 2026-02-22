@@ -60,7 +60,7 @@ CANONICAL_FORM_FILLER_ABSOLUTE = {
 SUBAGENT_RUNS_PATH = os.path.expanduser("~/.openclaw/subagents/runs.json")
 SESSION_STORE_PATH = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
 ORPHAN_GRACE_SECONDS = 90
-RUN_HEARTBEAT_TIMEOUT_SECONDS = 180
+RUN_HEARTBEAT_TIMEOUT_SECONDS = 10 * 60  # 10 min — allows complex Greenhouse forms to breathe
 RUN_STALE_SECONDS = 20 * 60
 
 

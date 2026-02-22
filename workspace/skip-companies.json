@@ -11,6 +11,7 @@
     {"name": "Waymo", "reason": "Maximum application limit reached.", "category": "limit"},
     {"name": "DeepMind", "reason": "Maximum application limit reached.", "category": "limit"},
     {"name": "Google DeepMind", "reason": "Maximum application limit reached.", "category": "limit"},
-    {"name": "Anthropic", "reason": "Maximum application limit reached (5-app/180-day window exhausted).", "category": "limit"}
+    {"name": "Anthropic", "reason": "Maximum application limit reached (5-app/180-day window exhausted).", "category": "limit"},
+    {"name": "Cartesia", "reason": "Does not sponsor H-1B visas. Confirmed by recruiter call 2026-02-21.", "category": "no_h1b"}
   ]
 }

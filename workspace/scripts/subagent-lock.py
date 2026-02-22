@@ -7,7 +7,7 @@ Usage:
   python3 scripts/subagent-lock.py unlock <ats_type>   -> removes lock file
 
 Lock files: ~/.openclaw/workspace/.locks/apply-<type>.lock
-Stale locks auto-expire after 20 minutes.
+Stale TTL: ashby/ashby2/lever=15min, greenhouse=45min (no effective limit within 30min session timeout).
 
 Design note:
   The lock is intentionally time-based (TTL), not PID-liveness based. Each
@@ -27,9 +27,17 @@ LOCKS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
     ".locks"
 )
-STALE_SECONDS = 20 * 60
+# Per-slot TTL: Greenhouse uses Sonnet on complex forms (can take 20-30 min per session).
+# Ashby/Lever use Haiku and typically finish in 10-15 min.
+SLOT_STALE_SECONDS = {
+    "ashby":      15 * 60,   # 15 min
+    "ashby2":     15 * 60,   # 15 min
+    "greenhouse": 45 * 60,   # 45 min (30 min subagent timeout + 15 min buffer)
+    "lever":      15 * 60,   # 15 min
+}
+DEFAULT_STALE_SECONDS = 20 * 60  # fallback for unknown slot names
 ORPHAN_GRACE_SECONDS = 90
-RUN_HEARTBEAT_TIMEOUT_SECONDS = 3 * 60
+RUN_HEARTBEAT_TIMEOUT_SECONDS = 10 * 60  # 10 min — must match apply-watchdog.py
 SUBAGENT_RUNS_PATH = os.path.expanduser("~/.openclaw/subagents/runs.json")
 SESSION_STORE_PATH = os.path.expanduser("~/.openclaw/agents/main/sessions/sessions.json")
 SESSION_DIR = os.path.expanduser("~/.openclaw/agents/main/sessions")
@@ -39,7 +47,11 @@ def lock_path(ats_type):
     return os.path.join(LOCKS_DIR, f"apply-{ats_type}.lock")
 
 
-def is_stale(path):
+def _slot_ttl(ats_type: str) -> int:
+    return SLOT_STALE_SECONDS.get(ats_type, DEFAULT_STALE_SECONDS)
+
+
+def is_stale(path, ats_type: str = ""):
     try:
         ts = int(os.path.getmtime(path))
         with open(path, "r") as f:
@@ -48,7 +60,7 @@ def is_stale(path):
                 ts = int(first)
 
         age = time.time() - ts
-        return age > STALE_SECONDS
+        return age > _slot_ttl(ats_type)
     except (OSError, ValueError):
         return True
 
@@ -108,7 +120,9 @@ def _run_is_active(run, session_store, now):
         started_sec = now
 
     run_age_sec = max(0.0, now - started_sec)
-    if run_age_sec > STALE_SECONDS:
+    # Use the largest possible TTL for run-age check (greenhouse is longest)
+    max_ttl = max(SLOT_STALE_SECONDS.values()) if SLOT_STALE_SECONDS else DEFAULT_STALE_SECONDS
+    if run_age_sec > max_ttl:
         return False
 
     last_heartbeat = _last_session_heartbeat_sec(run, session_store, now)
@@ -158,12 +172,13 @@ def cmd_check(ats_type):
             print("UNLOCKED (orphan lock removed)")
             return
 
-        if is_stale(path):
+        if is_stale(path, ats_type):
             os.remove(path)
             print("UNLOCKED (stale lock removed)")
         else:
             age_min = (time.time() - ts) / 60
-            print(f"LOCKED ({age_min:.0f}min ago)")
+            ttl_min = _slot_ttl(ats_type) // 60
+            print(f"LOCKED ({age_min:.0f}min ago, ttl={ttl_min}min)")
     else:
         print("UNLOCKED")
 

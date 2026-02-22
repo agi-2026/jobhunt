@@ -737,6 +737,10 @@ def build_api_response() -> dict:
     offer_days = (OFFER_DEADLINE - now).days
     h1b_days = (H1B_REG_DEADLINE - now).days
 
+    # Sort queues by score descending so highest-priority jobs appear first
+    queue_sections["pending"].sort(key=lambda j: j.get("score", 0), reverse=True)
+    queue_sections["manual_apply"].sort(key=lambda j: j.get("score", 0), reverse=True)
+
     return {
         "timestamp": now.isoformat(),
         "offer_days": offer_days,
@@ -881,6 +885,8 @@ let cd = 30;
 let activeTab = 'pending';
 let searchQ = '';
 let stageFilter = 'all';
+let pendingSort = 'score';
+let pendingTitleFilter = 'all';
 
 async function refresh() {
   try {
@@ -944,20 +950,74 @@ function render() {
 
 function renderPending() {
   const el = document.getElementById('p-pending');
-  const jobs = D.pending;
-  if (!jobs.length) { el.innerHTML = '<div class="empty">No pending jobs in queue</div>'; return; }
-  el.innerHTML = `<table>
+  let jobs = [...(D.pending || [])];
+  const allTitles = [...new Set(jobs.map(j => j.title).filter(Boolean))].sort();
+  if (pendingTitleFilter !== 'all') {
+    jobs = jobs.filter(j => j.title === pendingTitleFilter);
+  }
+  if (pendingSort === 'company') {
+    jobs.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
+  } else if (pendingSort === 'location') {
+    jobs.sort((a, b) => (a.location || '').localeCompare(b.location || ''));
+  } else {
+    jobs.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+  const filteredNote = pendingTitleFilter !== 'all' ? ` of ${D.pending.length}` : '';
+  el.innerHTML = `
+    <div class="filter-bar" style="display:flex;gap:8px;align-items:center;padding:8px 0;flex-wrap:wrap">
+      <select onchange="pendingSort=this.value;renderPending()" style="padding:4px 8px;border-radius:4px;border:1px solid #444;background:#222;color:#e0e0e0">
+        <option value="score" ${pendingSort==='score'?'selected':''}>Sort: Score ↓</option>
+        <option value="company" ${pendingSort==='company'?'selected':''}>Sort: Company A→Z</option>
+        <option value="location" ${pendingSort==='location'?'selected':''}>Sort: Location A→Z</option>
+      </select>
+      <select onchange="pendingTitleFilter=this.value;renderPending()" style="padding:4px 8px;border-radius:4px;border:1px solid #444;background:#222;color:#e0e0e0;max-width:300px">
+        <option value="all" ${pendingTitleFilter==='all'?'selected':''}>All Titles</option>
+        ${allTitles.map(t => `<option value="${h(t)}" ${pendingTitleFilter===t?'selected':''}>${h(t)}</option>`).join('')}
+      </select>
+      <span style="color:#888;font-size:13px">${jobs.length}${filteredNote} jobs</span>
+    </div>
+    ${jobs.length === 0 ? '<div class="empty">No matching jobs</div>' : `<table>
     <tr><th>Score</th><th>Company</th><th>Title</th><th>Location</th><th>H-1B</th><th>Link</th><th></th></tr>
-    ${jobs.map((j,i) => `<tr>
+    ${jobs.map(j => `<tr>
       <td class="score">${j.score}</td>
       <td>${h(j.company)}</td>
       <td>${h(j.title)}</td>
       <td>${h(j.location)}</td>
-      <td>${h(j.h1b).substring(0,20)}</td>
+      <td>${h(j.h1b||'').substring(0,20)}</td>
       <td class="url-cell"><a href="${h(j.url)}" target="_blank">Open</a></td>
-      <td style="white-space:nowrap"><button class="btn-mark" data-i="${i}" data-t="pending" onclick="markBtn(this)">Mark Applied</button><button class="btn-delete" data-i="${i}" data-t="pending" onclick="deleteBtn(this)">Delete</button></td>
+      <td style="white-space:nowrap"><button class="btn-mark" data-url="${h(j.url)}" data-company="${h(j.company)}" data-title="${h(j.title)}" onclick="markBtnPending(this)">Mark Applied</button><button class="btn-delete" data-url="${h(j.url)}" data-company="${h(j.company)}" data-title="${h(j.title)}" onclick="deleteBtnPending(this)">Delete</button></td>
     </tr>`).join('')}
-  </table>`;
+    </table>`}`;
+}
+
+async function markBtnPending(btn) {
+  const url = btn.dataset.url, company = btn.dataset.company, title = btn.dataset.title;
+  if (!confirm(`Mark "${company} — ${title}" as applied?`)) return;
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await fetch('/api/mark-applied', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, company, title})
+    });
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error || 'Failed', 1); btn.disabled = false; btn.textContent = 'Mark Applied'; }
+  } catch(e) { toast('Error: ' + e.message, 1); btn.disabled = false; btn.textContent = 'Mark Applied'; }
+}
+
+async function deleteBtnPending(btn) {
+  const url = btn.dataset.url, company = btn.dataset.company, title = btn.dataset.title;
+  if (!confirm(`DELETE "${company} — ${title}"?\\n\\nThis removes it from the queue and permanently blocks re-adding.`)) return;
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await fetch('/api/delete-job', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, company, title})
+    });
+    const res = await r.json();
+    if (res.ok) { toast(res.message); refresh(); }
+    else { toast(res.error || 'Failed', 1); btn.disabled = false; btn.textContent = 'Delete'; }
+  } catch(e) { toast('Error: ' + e.message, 1); btn.disabled = false; btn.textContent = 'Delete'; }
 }
 
 function renderManual() {

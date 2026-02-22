@@ -181,11 +181,32 @@ CURATED_FILES: List[Dict[str, Any]] = [
         "tags": ["captcha", "lever", "js"],
     },
     {
+        "id": "lever_solve_hcaptcha_audio",
+        "path": "scripts/solve-hcaptcha-audio.py",
+        "purpose": "Solve hCaptcha via audio challenge + Whisper ASR. Run as exec: python3 scripts/solve-hcaptcha-audio.py. Exit 0 = prints digit answer to stdout. Exit 1 = failure.",
+        "profiles": ["apply-lever"],
+        "tags": ["captcha", "lever", "whisper", "audio"],
+    },
+    {
         "id": "mark_applied_script",
         "path": "scripts/mark-applied.py",
         "purpose": "Marks applied status in queue and tracker.",
         "profiles": ["apply-common"],
         "tags": ["tracking", "status"],
+    },
+    {
+        "id": "answers_bank",
+        "path": "config/answers-bank.md",
+        "purpose": "Pre-written answers for common custom application questions (work auth, salary, essays, demographics).",
+        "profiles": ["apply-ashby", "apply-greenhouse", "apply-lever"],
+        "tags": ["answers", "custom-questions", "application"],
+    },
+    {
+        "id": "soul_context",
+        "path": "SOUL.md",
+        "purpose": "Howard's persona, role-specific narrative answers, achievements, and communication guidelines.",
+        "profiles": ["apply-ashby", "apply-greenhouse", "apply-lever"],
+        "tags": ["persona", "essays", "narrative", "application"],
     },
 ]
 

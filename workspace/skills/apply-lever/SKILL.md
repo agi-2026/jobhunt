@@ -128,40 +128,77 @@ If `customQuestions[]` is non-empty:
 - Take post-submit snapshot.
 
 ### Phase 5.5: hCaptcha Challenge (if present)
-After clicking submit, hCaptcha may appear as an overlay with an image grid challenge.
+After clicking submit, hCaptcha may appear as an overlay (image grid or audio challenge).
 
 **Detection:**
-Load hCaptcha detector only when needed:
+If the post-submit snapshot shows a CAPTCHA challenge (image grid, checkbox, or audio prompt), proceed.
+Optionally load detector for metadata:
 `exec: python3 scripts/context-manifest.py read lever_detect_hcaptcha --max-lines 220 --raw`
-then run via evaluate. If `detected: true`, proceed with solving.
-Alternatively, if the post-submit snapshot shows an image grid overlay with a prompt like "Please click each image containing a ___", that's hCaptcha.
 
-**Solving (max 5 rounds):**
-1. Take a snapshot — you will see the hCaptcha modal with:
+**Strategy: Audio-first (Whisper ASR), visual fallback. Max 5 total rounds.**
+
+#### Audio Path — try first (up to 3 rounds):
+
+1. Run the Whisper audio solver. It automatically clicks the audio button, waits for audio to load,
+   downloads it, and transcribes via Whisper ASR:
+   ```
+   exec: python3 scripts/solve-hcaptcha-audio.py
+   ```
+   - **Exit 0**: stdout contains the answer (e.g. `3 7 2 4 1 5`). Call this `AUDIO_ANSWER`.
+   - **Exit 1**: audio path unavailable or transcription empty → skip to Visual Path.
+
+2. Take a fresh snapshot to see the current hCaptcha UI (now showing audio input box + Verify button).
+
+3. Locate the text input box inside the hCaptcha challenge area.
+   It is cross-origin, so use coordinate-based click at the center of the input:
+   ```
+   browser action="act" profile="lever" request={"kind":"click","x":<X>,"y":<Y>}
+   ```
+
+4. Type the answer:
+   ```
+   browser action="act" profile="lever" request={"kind":"type","text":"<AUDIO_ANSWER>"}
+   ```
+
+5. Click the Verify button (coordinate-based, bottom of challenge modal):
+   ```
+   browser action="act" profile="lever" request={"kind":"click","x":<X>,"y":<Y>}
+   ```
+
+6. Take a post-verify snapshot:
+   - Confirmation page / form gone → **SUCCESS** → proceed to Phase 6.
+   - "Please try again" or new challenge → increment audio round, repeat from step 1.
+   - After 3 failed audio rounds → switch to Visual Path below.
+
+#### Visual Path — fallback (remaining rounds up to 5 total):
+
+1. Take a snapshot — the hCaptcha modal shows:
    - A prompt at the top (e.g., "Please click each image containing a **motorbus**")
-   - A 3x3 or 4x4 grid of images below the prompt
+   - A 3x3 or 4x4 grid of images
    - A "Verify" button at the bottom
 2. Analyze each grid image carefully. Identify ALL images matching the prompt.
-3. Click each matching image one at a time using `act: click` on the image cell.
-   - Use the visual ref from the snapshot if available.
-   - If refs don't work (cross-origin iframe), use coordinate-based clicking:
-     `browser action="act" profile="lever" request={"kind":"click","x":<X>,"y":<Y>}`
-     where X,Y are the CENTER coordinates of each matching grid cell.
-4. After clicking all matching images, click the "Verify" button.
-5. Take another snapshot:
-   - If confirmation page → SUCCESS, proceed to Phase 6.
-   - If new hCaptcha round → repeat from step 1 (max 5 rounds total).
-   - If "Please try again" error → retry the same round.
-6. If still challenged after 5 rounds, defer to manual apply and stop this run:
-   - `exec: python3 scripts/defer-manual-apply.py "<url>" "<Company>" "<Title>" "lever" --reason "hCaptcha unsolved after 5 rounds"`
-   - Set terminal outcome `DEFERRED`.
-   - Do not open another URL.
+3. Click each matching image using coordinate-based clicking:
+   ```
+   browser action="act" profile="lever" request={"kind":"click","x":<X>,"y":<Y>}
+   ```
+   where X,Y are the CENTER coordinates of each matching grid cell. Wait ~200ms between clicks.
+4. Click the Verify button.
+5. Take a snapshot:
+   - Confirmation page → **SUCCESS** → proceed to Phase 6.
+   - New round → repeat (counting against the 5-round total limit).
+   - "Please try again" → retry the same round.
 
-**Tips for accurate solving:**
-- Look at EACH image carefully — some images may be ambiguous.
-- hCaptcha prompts can be tricky: "motorbus" = bus, "vertical river" = waterfall, "seaplane" = plane on water.
-- Select ALL matching images, not just some. Missing one fails the round.
-- Click images one at a time, wait ~200ms between clicks.
+**If still unsolved after 5 total rounds (audio + visual combined):**
+```
+exec: python3 scripts/remove-from-queue.py "<url>" --reason "hCaptcha unsolved after 5 rounds"
+```
+Set terminal outcome `DEFERRED`. Do not open another URL.
+
+**Tips:**
+- Audio answer is digits spoken slowly. Whisper transcription is usually exact.
+- If Whisper returns letters/words instead of digits, audio path failed — use visual.
+- Visual: "motorbus" = bus, "vertical river" = waterfall, "seaplane" = plane on water.
+- Select ALL matching images — missing one fails the round.
 
 ### Phase 6: Post-Submit
 ```
@@ -200,7 +237,7 @@ Lever forms can cause browser refs to go stale on large pages. Strategy:
 
 ## Lever-Specific Notes
 - Simplest ATS: usually name, email, phone, resume, LinkedIn, optional additional info
-- hCaptcha present on many Lever forms since Feb 2026. Solve using vision (Phase 5.5). If solving fails after 5 rounds, defer to manual apply.
+- hCaptcha present on many Lever forms since Feb 2026. Audio-first solve (Whisper ASR via solve-hcaptcha-audio.py), visual fallback. Phase 5.5. Max 5 rounds total.
 - Native HTML `<select>` dropdowns — all filled by JS (no Playwright needed for dropdowns)
 - Fastest target: 2-4 minutes per application when working correctly
 - Main failure mode is ref staleness, not form complexity
@@ -210,7 +247,7 @@ Lever forms can cause browser refs to go stale on large pages. Strategy:
 - **Narrow selectors:** Never use broad selectors like `button, [class*=code]`. Always scope to a specific section.
 
 ## Skip Rules
-- CAPTCHA: Attempt to solve via vision (Phase 5.5). If unsolved after 5 rounds, defer to manual apply and end the run.
+- CAPTCHA: Follow Phase 5.5 (audio-first via Whisper, visual fallback). If unsolved after 5 rounds, remove from queue and end the run.
 - 3 failed retries: SKIP with reason
 - Non-US locations: SKIP (verify location before applying)
 - Check `skip-companies.json` — companies listed there must be SKIPPED

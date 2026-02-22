@@ -81,6 +81,11 @@ COMPANY_INFO = {
     'apolloresearch': {'name': 'Apollo Research', 'info': 'AI safety evals, frontier model research', 'score': 80, 'h1b': 'Likely'},
     'dexterity': {'name': 'Dexterity', 'info': 'CV + ML for robotic manipulation', 'score': 80, 'h1b': 'Likely'},
     'rivr': {'name': 'RIVR', 'info': 'Wheeled-legged robotics, imitation learning', 'score': 70, 'h1b': 'Likely'},
+    # Added 2026-02-21 (batch expansion)
+    'levelai': {'name': 'Level AI', 'info': 'NLP/ML for contact center intelligence, conversational AI', 'score': 75, 'h1b': 'Likely'},
+    'wisdomai': {'name': 'WisdomAI', 'info': 'LLM-based code generation and document understanding', 'score': 80, 'h1b': 'Likely'},
+    'Hume': {'name': 'Hume AI', 'info': 'Empathic AI, speech-language models, RL from human feedback ($50M+)', 'score': 80, 'h1b': 'Likely'},
+    'valence': {'name': 'Valence', 'info': 'AI coaching platform for enterprises (Series B)', 'score': 65, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):

@@ -125,21 +125,28 @@ SCORE 0-100 based SOLELY on how well the job title + team fits his profile:
   • ML Infrastructure / ML Platform Engineer (building systems *for* model training/serving, not generic cloud infra) → 70-80
   • Applied Scientist (with ML/modeling focus, NOT analytics/BI) → 70-80
   • Data Scientist with deep ML/modeling focus (NOT dashboards/SQL) → 65-72
+  • AI Outcome Engineer / Outcome Engineer (AI-focused, deploys and implements AI systems for customers — FDE-adjacent, lucrative) → 65-75
+  • Strategic Projects Lead (Coding) / Strategic Lead (Engineering) — explicit coding/engineering qualifier makes this IC, not PM → 62-72
 
 30-69  WEAK — Low priority, only if nothing better:
   • Generic Software Engineer at AI company with no qualifier → 45-55
   • Backend/Systems Engineer at AI company (could be model serving adjacent) → 35-50
   • Platform/Infrastructure Engineer without AI qualifier → 35-48
   • Data Scientist without clear ML modeling focus → 30-45
-  • Robotics / Autonomy SWE with some ML component → 40-55
+  • ML/AI Engineer at robotics company doing ML work (NOT robot control, planning, or SLAM) → 35-50
 
 0-29  AUTO-SKIP — Do NOT queue these:
   • Full Stack Engineer / Frontend Engineer (regardless of company) → 5-20
   • Data Engineer (ETL, pipelines, Spark, dbt — not ML) → 10-22
   • Solutions Engineer / Sales Engineer / Field Engineer → 5-18
   • GTM Engineer / Revenue Engineer → 0-12
-  • DevOps / SRE / Cloud Engineer without ML focus → 10-25
-  • Fleet Safety / Robotics Safety (non-ML engineering domain) → 10-22
+  • DevOps / SRE / Cloud Engineer / Site Reliability Engineer without ML focus → 5-20
+  • Infrastructure Engineer / Platform Engineer (generic cloud/Kubernetes/networking) → 5-20
+  • Fleet Safety / Robotics Safety (non-ML engineering domain) → 5-15
+  • Robotics Engineer / Robotics SWE / Robot Perception / Motion Planning / SLAM / Sensor Fusion → 0-12
+  • Autonomous Vehicle Engineer / AV Engineer (sensor fusion, routing, planning — not ML-first) → 0-12
+  • GPU Kernel Engineer / CUDA Kernel Developer / Triton Kernel / Compiler Engineer (XLA, MLIR, hardware drivers, kernel coding) → 0-15
+  • Systems Engineer focused on low-level performance / hardware abstraction / kernel-level optimization → 0-15
   • Product Manager / Program Manager → 0-15
   • Recruiter / HR / Operations / Finance / Legal / Marketing → 0-8
   • Hardware / Mechanical / Electrical / Civil / Chemical Engineer → 0-10
@@ -154,9 +161,18 @@ TITLE PENALTIES (apply before final score):
 
 IMPORTANT RULES:
   • Judge by JOB ROLE first, company second. A "Mechanical Engineer" at OpenAI is still 0-10.
+  • "Full-Stack Engineer", "Full Stack Engineer", "Fullstack Engineer" = ALWAYS 0-20, even with an AI qualifier in parentheses (e.g., "Senior Full-stack Engineer (Agentic AI)" is still 0-20). The actual work is web UI + API, not ML.
   • "Software Engineer" with NO qualifier at AI company = 45-55 (might be ML-adjacent, can't tell)
   • "Software Engineer, AI Agents" or "SWE - LLM" = 75-85 (explicit AI qualifier saves it)
   • Do NOT reward a company name alone. Score the work the person does.
+  • Physical robotics (motion planning, SLAM, sensor fusion, robot arm control) = always 0-12, even at top AI/robotics companies (Figure AI, Physical Intelligence, Boston Dynamics, Waymo). The work domain is mechanical robotics, not Howard's background.
+  • Low-level GPU/systems work (CUDA kernels, Triton, XLA/MLIR compilers, hardware drivers, kernel optimization) = always 0-15. Howard uses PyTorch/JAX as an ML practitioner, not as a systems/kernel programmer.
+  • "ML Performance" / "Performance Engineering" / "Inference Engineering" roles at GPU infrastructure companies (e.g. Modal, CoreWeave, Anyscale, Crusoe) typically require CUDA profiling, SM occupancy tuning, TensorRT/Triton Server in C++/Go, and kernel-level GPU work — score 0-15. Only score higher if the role is clearly algorithmic (e.g. "LLM inference optimization" at a research lab without CUDA requirements).
+  • CoreWeave roles: nearly all are GPU infra/cloud engineering. Apply extra scrutiny — even "AI/ML" titles at CoreWeave usually mean building serving infrastructure, not model work. Default to 10-25 unless the title explicitly says ML Research/Post-Training/Agents.
+  • "Member of Technical Staff" with a systems/performance/infra qualifier (e.g. "MTS - ML Performance", "MTS - Kernel", "MTS - Infrastructure") = score the QUALIFIER, not the "MTS" label. MTS + systems qualifier → 0-20. MTS at AI-first company with no qualifier → 90+.
+  • "ML Infrastructure" in title = 70-80 ONLY if it clearly means building ML training pipelines or model serving systems. If the role is about Kubernetes, cloud storage, networking, or cluster operations → treat as generic infra → 10-22.
+  • "(Coding)" or "(Engineering)" suffix on an otherwise PM-sounding title (e.g. "Strategic Projects Lead (Coding)") means it is an IC engineering role — do NOT score it as a PM. Treat it like a senior IC engineer with coding responsibilities.
+  • "Outcome Engineer" / "AI Outcome Engineer" = FDE-adjacent customer-facing AI deployment role. Score 65-75 — do NOT score as "unclear" or skip.
 
 Jobs to score (format: [index] Company | Title | Department/Team):
 {jobs_text}
@@ -291,7 +307,17 @@ def _fallback_score(job):
                'gtm engineer', 'revenue engineer', 'data engineer',
                'frontend engineer', 'full stack', 'fullstack', 'full-stack',
                'product manager', 'program manager', 'director', 'vp of',
-               'head of', 'recruiter', 'fleet safety', 'civil engineer']
+               'head of', 'recruiter', 'fleet safety', 'civil engineer',
+               # Robotics (physical/mechanical domain)
+               'robotics engineer', 'robotics software engineer', 'robot perception',
+               'motion planning', 'sensor fusion', 'slam engineer',
+               'autonomous vehicle engineer', 'av engineer',
+               # Low-level GPU / kernel / compiler work
+               'gpu kernel', 'cuda kernel', 'triton kernel', 'kernel engineer',
+               'compiler engineer', 'kernel developer', 'low-level systems',
+               # Generic infra (non-ML)
+               'site reliability', 'sre engineer', 'devops engineer',
+               'cloud engineer', 'infrastructure engineer', 'platform engineer']
     for kw in skip_kw:
         if kw in title:
             return {'score': 15, 'reason': f'skip: {kw}', 'relevant': False}
