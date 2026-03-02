@@ -35,6 +35,7 @@ Before reading large files:
 - Target completion time: 4-8 minutes per job.
 - If no terminal outcome after 8 minutes, set terminal outcome `DEFERRED` and STOP this run.
 - On browser infrastructure errors (`Can't reach the OpenClaw browser control service`, `browser connection lost`, `target closed`, `service unavailable`), stop retrying immediately, set terminal outcome `DEFERRED`, and STOP this run.
+- **NEVER run `openclaw gateway restart` or any `openclaw gateway *` command.** These are absolutely forbidden in subagent runs. If the browser times out, the correct response is DEFERRED — NOT gateway restart.
 - Never spend more than 90 seconds retrying infrastructure failures.
 - Snapshot budget: max 3 full snapshots per run. Avoid repeated full snapshots unless required for submit/captcha troubleshooting.
 
@@ -68,7 +69,7 @@ exec: python3 scripts/search-connections.py "<Company Name>"
 ### Phase 2: Fill Form
 Copy resume first:
 ```
-exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 ```
 Read `skills/apply-lever/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="lever"`.
 Load canonical JS via manifest immediately before evaluate:
@@ -97,7 +98,7 @@ browser action="act" profile="lever" request={"kind":"type","ref":"<ref or selec
 Wait 1-2 seconds after Phase 2/2.5 completes, then upload:
 Use `inputElement` from `fileUploadSelectors` (returned by form-filler.js) for a precise selector:
 ```
-browser action="upload" profile="lever" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
+browser action="upload" profile="lever" paths=["/Users/howard/.openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
 ```
 If `inputElement` is not available, fallback to `element="input[type=file]"`.
 

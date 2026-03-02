@@ -36,7 +36,7 @@ def _get_auth():
       1. ANTHROPIC_API_KEY env var / .env file → api.anthropic.com (sk-ant-api03-...)
       2. OAuth access token from ~/.openclaw/agents/main/agent/auth-profiles.json
          → api.anthropic.com with anthropic-beta: oauth-2025-04-20 header
-         → claude-sonnet-4-6 (Claude Max subscription, zero additional cost)
+         → claude-opus-4-6 (Claude Max subscription, zero additional cost)
     """
     script_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -46,7 +46,7 @@ def _get_auth():
             return (
                 'https://api.anthropic.com/v1/messages',
                 {'Content-Type': 'application/json', 'x-api-key': key_src, 'anthropic-version': '2023-06-01'},
-                'claude-sonnet-4-6',
+                'claude-opus-4-6',
                 'anthropic',
             )
 
@@ -68,7 +68,7 @@ def _get_auth():
                         'anthropic-version': '2023-06-01',
                         'anthropic-beta': 'oauth-2025-04-20',
                     },
-                    'claude-sonnet-4-6',
+                    'claude-opus-4-6',
                     'anthropic',
                 )
         except Exception:
@@ -137,6 +137,7 @@ SCORE 0-100 based SOLELY on how well the job title + team fits his profile:
 
 0-29  AUTO-SKIP — Do NOT queue these:
   • Full Stack Engineer / Frontend Engineer (regardless of company) → 5-20
+  • Data Scientist (ALL data scientist roles, regardless of qualifier — analytics, algorithms, ML, fraud, ads, pricing, etc.) → 5-18. Even "Data Scientist, ML" or "Data Scientist, Algorithms" is still a DS role, not ML engineering.
   • Data Engineer (ETL, pipelines, Spark, dbt — not ML) → 10-22
   • Solutions Engineer / Sales Engineer / Field Engineer → 5-18
   • GTM Engineer / Revenue Engineer → 0-12
@@ -153,11 +154,14 @@ SCORE 0-100 based SOLELY on how well the job title + team fits his profile:
   • Director / VP / Head of (management, not IC) → 0-20
   • Any role clearly requiring 10+ years or C-suite level → 0-20
 
-TITLE PENALTIES (apply before final score):
-  • Title contains "Senior Staff" → subtract 12 (over-leveled, implies 8+ yrs)
-  • Title contains "Principal" → subtract 8 (over-leveled, implies 7+ yrs)
-  • Title explicitly says "6+ Years", "7+ Years", "8+ Years" in the title → subtract 25
-  • Title is "Founding" at tiny seed co AND role is IC engineering → no penalty (founding engineer at startup is fine)
+OVER-LEVELED TITLES — AUTO-SKIP (score 0-15, regardless of role match):
+  • Title contains "Principal" (e.g. "Principal ML Engineer") → 0-15 (requires 7+ yrs)
+  • Title contains "Staff" BUT NOT "Member of Technical Staff" (e.g. "Staff Engineer", "Staff SWE") → 0-15 (requires 5+ yrs)
+  • Title contains "Senior Staff" → 0-15 (requires 8+ yrs)
+  • Title contains "Distinguished" → 0-10 (requires 10+ yrs)
+  • Title explicitly says "6+ Years", "7+ Years", "8+ Years", "10+ Years" → 0-15
+  • EXCEPTION: "Member of Technical Staff" (MTS) is NOT over-leveled — score it by the role/qualifier as normal
+  • EXCEPTION: "Founding" at startup is NOT over-leveled — score normally
 
 IMPORTANT RULES:
   • Judge by JOB ROLE first, company second. A "Mechanical Engineer" at OpenAI is still 0-10.
@@ -169,7 +173,7 @@ IMPORTANT RULES:
   • Low-level GPU/systems work (CUDA kernels, Triton, XLA/MLIR compilers, hardware drivers, kernel optimization) = always 0-15. Howard uses PyTorch/JAX as an ML practitioner, not as a systems/kernel programmer.
   • "ML Performance" / "Performance Engineering" / "Inference Engineering" roles at GPU infrastructure companies (e.g. Modal, CoreWeave, Anyscale, Crusoe) typically require CUDA profiling, SM occupancy tuning, TensorRT/Triton Server in C++/Go, and kernel-level GPU work — score 0-15. Only score higher if the role is clearly algorithmic (e.g. "LLM inference optimization" at a research lab without CUDA requirements).
   • CoreWeave roles: nearly all are GPU infra/cloud engineering. Apply extra scrutiny — even "AI/ML" titles at CoreWeave usually mean building serving infrastructure, not model work. Default to 10-25 unless the title explicitly says ML Research/Post-Training/Agents.
-  • "Member of Technical Staff" with a systems/performance/infra qualifier (e.g. "MTS - ML Performance", "MTS - Kernel", "MTS - Infrastructure") = score the QUALIFIER, not the "MTS" label. MTS + systems qualifier → 0-20. MTS at AI-first company with no qualifier → 90+.
+  • "Member of Technical Staff" with a systems/performance/infra qualifier (e.g. "MTS - ML Performance", "MTS - Kernel", "MTS - Infrastructure") = score the QUALIFIER, not the "MTS" label. MTS + low-level systems qualifier (kernel, CUDA, hardware) → 0-20. MTS + ML-adjacent systems qualifier (ML Training, Inference, RL, Post-Training) → 80-92 (these build model training/serving pipelines). MTS at AI-first company with no qualifier → 90+.
   • "ML Infrastructure" in title = 70-80 ONLY if it clearly means building ML training pipelines or model serving systems. If the role is about Kubernetes, cloud storage, networking, or cluster operations → treat as generic infra → 10-22.
   • "(Coding)" or "(Engineering)" suffix on an otherwise PM-sounding title (e.g. "Strategic Projects Lead (Coding)") means it is an IC engineering role — do NOT score it as a PM. Treat it like a senior IC engineer with coding responsibilities.
   • "Outcome Engineer" / "AI Outcome Engineer" = FDE-adjacent customer-facing AI deployment role. Score 65-75 — do NOT score as "unclear" or skip.
@@ -304,7 +308,7 @@ def _fallback_score(job):
     # Auto-skip tier (0-29)
     skip_kw = ['mechanical engineer', 'electrical engineer', 'hardware engineer',
                'solutions engineer', 'sales engineer', 'field engineer',
-               'gtm engineer', 'revenue engineer', 'data engineer',
+               'gtm engineer', 'revenue engineer', 'data engineer', 'data scientist',
                'frontend engineer', 'full stack', 'fullstack', 'full-stack',
                'product manager', 'program manager', 'director', 'vp of',
                'head of', 'recruiter', 'fleet safety', 'civil engineer',
@@ -322,6 +326,23 @@ def _fallback_score(job):
         if kw in title:
             return {'score': 15, 'reason': f'skip: {kw}', 'relevant': False}
 
+    # Over-leveled titles — auto-skip (except "Member of Technical Staff" and "Founding")
+    is_mts = 'member of technical staff' in title
+    is_founding = 'founding' in title
+    if not is_mts and not is_founding:
+        if 'distinguished' in title:
+            return {'score': 10, 'reason': 'over-leveled: distinguished', 'relevant': False}
+        if 'senior staff' in title:
+            return {'score': 12, 'reason': 'over-leveled: senior staff', 'relevant': False}
+        if 'principal' in title:
+            return {'score': 12, 'reason': 'over-leveled: principal', 'relevant': False}
+        # "Staff" but not "Member of Technical Staff" — check for "staff" as a level prefix
+        if 'staff ' in title and title.index('staff ') < len(title) // 2:
+            return {'score': 12, 'reason': 'over-leveled: staff', 'relevant': False}
+    for yr in ['6+ year', '7+ year', '8+ year', '10+ year']:
+        if yr in title:
+            return {'score': 10, 'reason': f'over-leveled: {yr}', 'relevant': False}
+
     # Perfect tier (90-100)
     perfect_kw = ['ml engineer', 'machine learning engineer', 'ai engineer',
                   'llm engineer', 'agent engineer', 'research scientist',
@@ -331,12 +352,7 @@ def _fallback_score(job):
                   'founding ai', 'applied ml', 'ai safety engineer']
     for kw in perfect_kw:
         if kw in title:
-            score = 92
-            if 'senior staff' in title: score -= 12
-            if 'principal' in title: score -= 8
-            for yr in ['6+ year', '7+ year', '8+ year', '10+ year']:
-                if yr in title: score -= 25
-            return {'score': max(30, score), 'reason': f'core: {kw}', 'relevant': True}
+            return {'score': 92, 'reason': f'core: {kw}', 'relevant': True}
 
     # Good tier (70-89)
     good_kw_explicit = ['software engineer, ai', 'software engineer - ai',

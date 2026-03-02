@@ -151,6 +151,60 @@ COMPANY_INFO = {
     'cursor': {'name': 'Anysphere (Cursor)', 'info': 'AI code editor ($9B, a16z/Thrive)', 'score': 95, 'h1b': 'Likely'},
     'claylabs': {'name': 'Clay', 'info': 'AI data enrichment ($1.3B, Sequoia)', 'score': 80, 'h1b': 'Likely'},
     'stainlessapi': {'name': 'Stainless', 'info': 'API SDK generation (OpenAI infra partner)', 'score': 75, 'h1b': 'Likely'},
+    # Added 2026-02-22
+    'happyrobot.ai': {'name': 'HappyRobot', 'info': 'AI voice agents for logistics/freight', 'score': 80, 'h1b': 'Likely'},
+
+    # Added 2026-02-22 (second batch ATS discovery)
+    # -- AI Agents / Memory --
+    'letta': {'name': 'Letta', 'info': 'Stateful AI agents / MemGPT (YC, Charles Packer)', 'score': 88, 'h1b': 'Likely'},
+    # -- LLM Research / Fine-tuning --
+    'nous': {'name': 'Nous Research', 'info': 'LLM fine-tuning and open-source model research', 'score': 85, 'h1b': 'Likely'},
+    'gradient': {'name': 'Gradient AI', 'info': 'LLM fine-tuning and customization platform', 'score': 82, 'h1b': 'Likely'},
+    # -- ML Serving / Infra --
+    'bentoml': {'name': 'BentoML', 'info': 'ML serving and deployment platform (BentoCloud)', 'score': 80, 'h1b': 'Likely'},
+    'beam': {'name': 'Beam', 'info': 'Serverless ML cloud compute (YC)', 'score': 80, 'h1b': 'Likely'},
+    'lancedb': {'name': 'LanceDB', 'info': 'Vector database optimized for multimodal AI', 'score': 75, 'h1b': 'Likely'},
+    'turbopuffer': {'name': 'TurboPuffer', 'info': 'High-performance vector search database', 'score': 73, 'h1b': 'Likely'},
+    # -- AI Healthcare --
+    'nabla': {'name': 'Nabla', 'info': 'AI copilot for clinicians, ambient documentation', 'score': 76, 'h1b': 'Likely'},
+    'notable': {'name': 'Notable Health', 'info': 'AI automation for healthcare workflows ($100M+)', 'score': 74, 'h1b': 'Likely'},
+    'corti': {'name': 'Corti', 'info': 'AI for clinical decision support and documentation', 'score': 75, 'h1b': 'Likely'},
+    # -- AI Personal Assistant --
+    'rewind': {'name': 'Rewind AI', 'info': 'Personalized AI using local compute and memory', 'score': 78, 'h1b': 'Likely'},
+
+    # Added 2026-02-22 (batch ATS discovery)
+    # -- AI Inference / Cloud Compute --
+    'modal': {'name': 'Modal', 'info': 'ML cloud compute, serverless GPU infra (a16z)', 'score': 85, 'h1b': 'Likely'},
+    'primeintellect': {'name': 'Prime Intellect', 'info': 'Distributed ML training / decentralized compute', 'score': 85, 'h1b': 'Likely'},
+    'fluidstack': {'name': 'FluidStack', 'info': 'GPU cloud for AI/ML workloads', 'score': 75, 'h1b': 'Likely'},
+    # -- AI Code Generation / Dev Tools --
+    'poolside': {'name': 'Poolside', 'info': 'Code generation AI via RL ($3B, Google/NVIDIA)', 'score': 90, 'h1b': 'Likely'},
+    'factory': {'name': 'Factory AI', 'info': 'AI software engineering agents (Sequoia)', 'score': 85, 'h1b': 'Likely'},
+    'greptile': {'name': 'Greptile', 'info': 'AI codebase search and Q&A (YC)', 'score': 80, 'h1b': 'Likely'},
+    'codegen': {'name': 'Codegen', 'info': 'AI code generation agents', 'score': 80, 'h1b': 'Likely'},
+    'replit': {'name': 'Replit', 'info': 'AI-powered coding platform ($1.16B, a16z)', 'score': 85, 'h1b': 'Likely'},
+    'sweep': {'name': 'Sweep AI', 'info': 'AI code review and refactoring (YC)', 'score': 75, 'h1b': 'Likely'},
+    # -- AI Voice / Audio --
+    'cartesia': {'name': 'Cartesia', 'info': 'Real-time voice AI / state-space models (a16z)', 'score': 88, 'h1b': 'Likely'},
+    'vapi': {'name': 'Vapi', 'info': 'Voice AI API platform for developers (YC)', 'score': 82, 'h1b': 'Likely'},
+    'bland': {'name': 'Bland AI', 'info': 'AI phone call automation (a16z)', 'score': 80, 'h1b': 'Likely'},
+    # -- AI Video / Multimodal --
+    'ideogram': {'name': 'Ideogram', 'info': 'Text-to-image AI ($230M, a16z/Index)', 'score': 85, 'h1b': 'Likely'},
+    'genmo': {'name': 'Genmo', 'info': 'Video generation AI (YC, Khosla)', 'score': 82, 'h1b': 'Likely'},
+    'krea': {'name': 'Krea.ai', 'info': 'Real-time AI creative generation platform', 'score': 78, 'h1b': 'Unknown'},
+    # -- AI Agents / Automation --
+    'dust': {'name': 'Dust', 'info': 'AI agents for enterprise workflows (Sequoia)', 'score': 83, 'h1b': 'Likely'},
+    'browserbase': {'name': 'Browserbase', 'info': 'Headless browser infra for AI agents (YC)', 'score': 80, 'h1b': 'Likely'},
+    'lindy': {'name': 'Lindy AI', 'info': 'AI automation agents (Salesforce-backed)', 'score': 80, 'h1b': 'Likely'},
+    # -- AI Data / MLOps / Evals --
+    'predibase': {'name': 'Predibase', 'info': 'LLM fine-tuning and serving platform (a16z)', 'score': 87, 'h1b': 'Likely'},
+    'llamaindex': {'name': 'LlamaIndex', 'info': 'LLM data framework / RAG infrastructure', 'score': 82, 'h1b': 'Likely'},
+    'roboflow': {'name': 'Roboflow', 'info': 'Computer vision platform and datasets (OpenAI-backed)', 'score': 78, 'h1b': 'Likely'},
+    'pinecone': {'name': 'Pinecone', 'info': 'Vector database for AI/ML ($138M, Andreessen)', 'score': 78, 'h1b': 'Likely'},
+    # -- AI Bio / Research --
+    'insitro': {'name': 'Insitro', 'info': 'ML-driven drug discovery ($400M, a16z)', 'score': 75, 'h1b': 'Likely'},
+    # -- Fintech with strong AI --
+    'ramp': {'name': 'Ramp', 'info': 'AI-powered finance platform ($7.65B, Founders Fund)', 'score': 82, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):
@@ -210,10 +264,20 @@ def match_score(title):
     # Auto-skip tier — will be filtered by Claude anyway, but catch obvious ones
     skip = ['mechanical engineer', 'electrical engineer', 'hardware engineer',
             'solutions engineer', 'sales engineer', 'gtm engineer',
-            'data engineer', 'full stack', 'fullstack', 'full-stack',
+            'data engineer', 'data scientist', 'full stack', 'fullstack', 'full-stack',
             'frontend engineer', 'fleet safety', 'product manager', 'program manager']
     if any(kw in t for kw in skip):
         return 10
+
+    # Over-leveled titles — auto-skip (except "Member of Technical Staff" and "Founding")
+    is_mts = 'member of technical staff' in t
+    is_founding = 'founding' in t
+    if not is_mts and not is_founding:
+        if 'distinguished' in t: return 10
+        if 'senior staff' in t: return 10
+        if 'principal' in t: return 10
+        if 'staff ' in t and t.index('staff ') < len(t) // 2: return 10
+    if any(yr in t for yr in ['6+ year', '7+ year', '8+ year', '10+ year']): return 10
 
     # Perfect tier
     perfect = ['ml engineer', 'machine learning engineer', 'ai engineer',
@@ -223,11 +287,7 @@ def match_score(title):
                'member of technical staff', 'founding engineer', 'founding ml',
                'founding ai', 'applied ml engineer']
     if any(kw in t for kw in perfect):
-        score = 92
-        if 'senior staff' in t: score -= 12
-        if 'principal' in t: score -= 8
-        if any(yr in t for yr in ['6+ year', '7+ year', '8+ year']): score -= 25
-        return max(30, score)
+        return 92
 
     # Good tier — SWE with explicit AI qualifier
     if 'software engineer' in t and any(q in t for q in ['ai', 'llm', 'agent', 'ml', 'model']):
@@ -242,8 +302,6 @@ def match_score(title):
     # Weak but valid
     if 'software engineer' in t:
         return 48
-    if 'data scientist' in t:
-        return 38
     if 'backend engineer' in t or 'platform engineer' in t:
         return 42
 

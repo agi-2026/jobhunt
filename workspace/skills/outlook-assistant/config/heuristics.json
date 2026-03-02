@@ -1,0 +1,83 @@
+{
+  "priority_rules": [
+    {
+      "type": "keyword_subject",
+      "keywords": ["interview", "schedule call", "phone screen", "on-site", "onsite", "offer letter", "offer details", "compensation", "final round"],
+      "boost": 100,
+      "tag": "INTERVIEW"
+    },
+    {
+      "type": "keyword_subject",
+      "keywords": ["h-1b", "h1b", "visa", "sponsorship", "immigration", "petition", "i-129", "uscis", "opt", "work authorization"],
+      "boost": 90,
+      "tag": "VISA"
+    },
+    {
+      "type": "keyword_subject",
+      "keywords": ["action required", "deadline", "urgent", "asap", "time-sensitive", "expires", "due date", "respond by"],
+      "boost": 80,
+      "tag": "ACTION"
+    },
+    {
+      "type": "keyword_subject",
+      "keywords": ["recruiter", "opportunity", "position", "role at", "hiring for", "came across your profile", "talent acquisition", "interested in your background"],
+      "boost": 70,
+      "tag": "RECRUITER"
+    },
+    {
+      "type": "keyword_subject",
+      "keywords": ["application status", "update on your application", "next steps", "moved forward", "regret to inform", "unfortunately", "pleased to inform", "congratulations"],
+      "boost": 60,
+      "tag": "APP-STATUS"
+    },
+    {
+      "type": "domain_from",
+      "domains": ["greenhouse.io", "ashbyhq.com", "lever.co", "myworkday.com", "icims.com", "smartrecruiters.com"],
+      "boost": 50,
+      "tag": "ATS"
+    },
+    {
+      "type": "applied_company_match",
+      "boost": 60,
+      "tag": "APPLIED-CO"
+    },
+    {
+      "type": "unread",
+      "boost": 30
+    },
+    {
+      "type": "flagged",
+      "boost": 40
+    },
+    {
+      "type": "importance_high",
+      "boost": 50
+    }
+  ],
+  "skip_senders": [
+    "noreply@github.com",
+    "notifications@github.com",
+    "no-reply@accounts.google.com",
+    "noreply@medium.com",
+    "no-reply@sns.amazonaws.com",
+    "mailer-daemon@",
+    "postmaster@"
+  ],
+  "skip_subject_patterns": [
+    "^Your .+ security code$",
+    "^\\[GitHub\\]",
+    "^Unsubscribe",
+    "newsletter",
+    "^Your order",
+    "^Payment received",
+    "^Receipt for"
+  ],
+  "known_recruiter_domains": [
+    "google.com", "meta.com", "anthropic.com", "openai.com",
+    "stripe.com", "amazon.com", "apple.com", "nvidia.com",
+    "databricks.com", "scale.com", "microsoft.com", "deepmind.com",
+    "cohere.com", "mistral.ai", "inflection.ai", "adept.ai",
+    "perplexity.ai", "anyscale.com", "together.ai", "modular.com",
+    "runway.com", "stability.ai", "huggingface.co", "figma.com"
+  ]
+}

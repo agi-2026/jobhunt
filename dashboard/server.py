@@ -734,8 +734,11 @@ def build_api_response() -> dict:
     tracker_data = parse_tracker(tracker_content)
 
     now = datetime.now()
-    offer_days = (OFFER_DEADLINE - now).days
-    h1b_days = (H1B_REG_DEADLINE - now).days
+    import math
+    offer_delta = OFFER_DEADLINE - now
+    h1b_delta = H1B_REG_DEADLINE - now
+    offer_days = math.ceil(offer_delta.total_seconds() / 86400)
+    h1b_days = math.ceil(h1b_delta.total_seconds() / 86400)
 
     # Sort queues by score descending so highest-priority jobs appear first
     queue_sections["pending"].sort(key=lambda j: j.get("score", 0), reverse=True)

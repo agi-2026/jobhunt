@@ -84,7 +84,7 @@ COMPANY_INFO = {
     'labelbox': {'info': 'AI data labeling ($188M, a16z)', 'score': 80, 'h1b': 'Likely'},
     'veriff': {'info': 'AI identity verification ($100M+)', 'score': 70, 'h1b': 'Unknown'},
     'saltsecurity': {'info': 'API security AI ($271M, Sequoia)', 'score': 70, 'h1b': 'Likely'},
-    'moveworks': {'info': 'IT AI automation ($305M, Sapphire)', 'score': 80, 'h1b': 'Likely'},
+    # 'moveworks': REMOVED 2026-02-22 — Howard in interview stage, no need to apply
     'neuralink': {'info': 'Brain-computer interface (Elon Musk)', 'score': 90, 'h1b': 'Likely'},
     'dialpad': {'info': 'AI communications ($230M)', 'score': 75, 'h1b': 'Likely'},
     'dynotherapeutics': {'info': 'AI drug discovery, Harvard spinout', 'score': 70, 'h1b': 'Likely'},
@@ -113,6 +113,51 @@ COMPANY_INFO = {
     'blackforestlabs': {'info': 'Flux image generation models (a16z)', 'score': 95, 'h1b': 'Likely'},
     # Added 2026-02-17
     'vectranetworks': {'info': 'AI cybersecurity/threat detection ($200M+)', 'score': 70, 'h1b': 'Likely'},
+    # Added 2026-02-22
+    'doordashusa': {'info': 'Food delivery platform ($50B+ mcap, AI/ML teams)', 'score': 80, 'h1b': 'Confirmed'},
+
+    # Added 2026-02-22 (batch ATS discovery)
+    # -- AI Cloud / Infrastructure --
+    'coreweave': {'info': 'GPU cloud for AI/ML ($19B valuation, Nvidia-backed)', 'score': 85, 'h1b': 'Confirmed'},
+    # -- Established tech, strong AI/ML teams --
+    'airbnb': {'info': 'Travel platform ($75B mcap), strong ML ranking/search team', 'score': 82, 'h1b': 'Confirmed'},
+    'lyft': {'info': 'Rideshare ($5B mcap), ML for matching/pricing/ETAs', 'score': 80, 'h1b': 'Confirmed'},
+    'reddit': {'info': 'Social platform ($15B mcap), ML for recommendations/safety', 'score': 78, 'h1b': 'Confirmed'},
+    'cloudflare': {'info': 'Network/security ($35B mcap), Workers AI platform', 'score': 80, 'h1b': 'Confirmed'},
+    'discord': {'info': 'Gaming/social platform ($15B), ML for safety/recommendations', 'score': 78, 'h1b': 'Confirmed'},
+    'coinbase': {'info': 'Crypto exchange ($55B mcap), ML for fraud/trading', 'score': 78, 'h1b': 'Confirmed'},
+    'instacart': {'info': 'Grocery delivery ($9B mcap), ML for search/recommendations', 'score': 78, 'h1b': 'Confirmed'},
+    'figma': {'info': 'Design platform ($12.5B valuation), AI features team', 'score': 80, 'h1b': 'Confirmed'},
+    'brex': {'info': 'AI-powered corporate cards/finance ($12.3B, Greenoaks)', 'score': 80, 'h1b': 'Likely'},
+    'roblox': {'info': 'Gaming platform ($20B mcap), ML for safety/generation/NPCs', 'score': 75, 'h1b': 'Confirmed'},
+    'elastic': {'info': 'Search/ML platform ($10B mcap), Elasticsearch AI', 'score': 75, 'h1b': 'Confirmed'},
+    'twilio': {'info': 'Communications platform ($10B mcap), AI/ML features', 'score': 72, 'h1b': 'Confirmed'},
+    'mongodb': {'info': 'Database ($25B mcap), Atlas Vector Search / AI integrations', 'score': 72, 'h1b': 'Confirmed'},
+    # -- AI Security --
+    'abnormalsecurity': {'info': 'AI-native email security ($5.1B, Greylock)', 'score': 78, 'h1b': 'Likely'},
+    # -- AI Financial / Analytics --
+    'alphasense': {'info': 'AI search for financial research ($4B, Goldman Sachs)', 'score': 80, 'h1b': 'Likely'},
+    # -- AI Hardware (SW/ML roles) --
+    'tenstorrent': {'info': 'AI accelerator chips (Jim Keller, $693M raised)', 'score': 75, 'h1b': 'Likely'},
+    # -- Autonomous Vehicles (ML modeling roles) --
+    'wayve': {'info': 'End-to-end AV with foundation models ($1B, Microsoft/Nvidia)', 'score': 80, 'h1b': 'Likely'},
+    'nuro': {'info': 'Autonomous delivery vehicles ($8B, SoftBank)', 'score': 72, 'h1b': 'Likely'},
+
+    # Added 2026-02-22 (second batch ATS discovery)
+    # -- AI Labs --
+    'imbue': {'info': 'RL-focused AI lab, agents that can reason and code ($200M, Astera)', 'score': 88, 'h1b': 'Likely'},
+    # -- AI Search --
+    'youcom': {'info': 'AI-native search engine (You.com, $45M, Samsung Next)', 'score': 80, 'h1b': 'Likely'},
+    # -- Observability / MLOps --
+    'datadog': {'info': 'Observability platform ($40B mcap), ML anomaly detection and AI ops', 'score': 75, 'h1b': 'Confirmed'},
+    'grafanalabs': {'info': 'Observability and monitoring (Grafana), ML for alerting/prediction', 'score': 70, 'h1b': 'Likely'},
+    # -- AI Customer Service --
+    'intercom': {'info': 'AI-first customer messaging platform ($125M ARR)', 'score': 75, 'h1b': 'Likely'},
+    'forethought': {'info': 'Generative AI for customer support automation ($92M, Andreessen)', 'score': 78, 'h1b': 'Likely'},
+    # -- B2B AI / Revenue --
+    '6sense': {'info': 'B2B revenue AI, account intelligence ($200M, Insight Partners)', 'score': 72, 'h1b': 'Likely'},
+    # -- Quant / HFT (ML-heavy) --
+    'jumptrading': {'info': 'Jump Trading, quantitative trading with ML/AI research teams', 'score': 78, 'h1b': 'Confirmed'},
 }
 
 def fetch_jobs(slug):
@@ -172,10 +217,20 @@ def match_score(title):
 
     skip = ['mechanical engineer', 'electrical engineer', 'hardware engineer',
             'solutions engineer', 'sales engineer', 'gtm engineer',
-            'data engineer', 'full stack', 'fullstack', 'full-stack',
+            'data engineer', 'data scientist', 'full stack', 'fullstack', 'full-stack',
             'frontend engineer', 'fleet safety', 'product manager', 'program manager']
     if any(kw in t for kw in skip):
         return 10
+
+    # Over-leveled titles — auto-skip (except "Member of Technical Staff" and "Founding")
+    is_mts = 'member of technical staff' in t
+    is_founding = 'founding' in t
+    if not is_mts and not is_founding:
+        if 'distinguished' in t: return 10
+        if 'senior staff' in t: return 10
+        if 'principal' in t: return 10
+        if 'staff ' in t and t.index('staff ') < len(t) // 2: return 10
+    if any(yr in t for yr in ['6+ year', '7+ year', '8+ year', '10+ year']): return 10
 
     perfect = ['ml engineer', 'machine learning engineer', 'ai engineer',
                'llm engineer', 'agent engineer', 'research scientist',
@@ -184,11 +239,7 @@ def match_score(title):
                'member of technical staff', 'founding engineer', 'founding ml',
                'founding ai', 'applied ml engineer']
     if any(kw in t for kw in perfect):
-        score = 92
-        if 'senior staff' in t: score -= 12
-        if 'principal' in t: score -= 8
-        if any(yr in t for yr in ['6+ year', '7+ year', '8+ year']): score -= 25
-        return max(30, score)
+        return 92
 
     if 'software engineer' in t and any(q in t for q in ['ai', 'llm', 'agent', 'ml', 'model']):
         return 78
@@ -200,8 +251,6 @@ def match_score(title):
 
     if 'software engineer' in t:
         return 48
-    if 'data scientist' in t:
-        return 38
     if 'backend engineer' in t or 'platform engineer' in t:
         return 42
 

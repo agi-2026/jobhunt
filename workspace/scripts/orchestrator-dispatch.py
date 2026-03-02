@@ -8,8 +8,8 @@ Builds a single readiness snapshot for all slots in one pass:
 - READY vs SKIPPED_* reason
 
 Slots:
-  ashby       → ats=ashby,      profile=ashby,      model=haiku
-  ashby2      → ats=ashby,      profile=ashby-2,    model=haiku   (parallel Ashby session)
+  ashby       → ats=ashby,      profile=ashby,      model=sonnet  (form-filler.js ~11K tokens, exceeds Haiku output)
+  ashby2      → ats=ashby,      profile=ashby-2,    model=sonnet  (parallel Ashby session, disabled)
   greenhouse  → ats=greenhouse,  profile=greenhouse,  model=sonnet  (complex forms need Sonnet)
   lever       → ats=lever,       profile=lever,       model=haiku
 
@@ -37,10 +37,11 @@ MODEL_SONNET = "anthropic/claude-sonnet-4-6"
 
 # Ordered slot definitions — each slot has independent lock + browser profile
 # ashby2 disabled — caused collision issues (both agents opening same job, one frozen)
+# ashby uses Sonnet (not Haiku) — form-filler.js is ~11,725 tokens, exceeds Haiku output limit
 ATS_SLOTS = [
-    {"slot": "ashby",      "ats": "ashby",      "model": MODEL_HAIKU},
+    {"slot": "ashby",      "ats": "ashby",      "model": MODEL_SONNET},
     {"slot": "greenhouse", "ats": "greenhouse",  "model": MODEL_SONNET},
-    {"slot": "lever",      "ats": "lever",       "model": MODEL_HAIKU},
+    {"slot": "lever",      "ats": "lever",       "model": MODEL_SONNET},
 ]
 
 NO_AUTO_COMPANIES = {"openai", "databricks", "pinterest", "deepmind", "google deepmind"}

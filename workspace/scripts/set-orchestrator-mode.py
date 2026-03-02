@@ -68,7 +68,7 @@ FIRST:
 - exec: python3 scripts/tool-menu.py --profile greenhouse --json
 - Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
 Then:
-1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 2) exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url
 3) Set immutable TARGET_URL from step 2.
 4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
@@ -107,7 +107,7 @@ FIRST:
 - exec: python3 scripts/tool-menu.py --profile ashby --json
 - Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
 Then:
-1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 2) exec: python3 scripts/queue-summary.py --actionable --ats ashby --top 1 --full-url
 3) Set immutable TARGET_URL from step 2.
 4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
@@ -145,7 +145,7 @@ FIRST:
 - exec: python3 scripts/tool-menu.py --profile lever --json
 - Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
 Then:
-1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 2) exec: python3 scripts/queue-summary.py --actionable --ats lever --top 1 --full-url
 3) Set immutable TARGET_URL from step 2.
 4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"
@@ -236,7 +236,7 @@ FIRST:
 - exec: python3 scripts/tool-menu.py --profile greenhouse --json
 - Tool policy: use only exec + browser + process in apply runs. Do NOT use read/write/edit tools.
 Then:
-1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+1) exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 2) exec: python3 scripts/queue-summary.py --actionable --ats greenhouse --top 1 --full-url
 3) Set immutable TARGET_URL from step 2.
 4) exec: python3 scripts/preflight-check.py "<TARGET_URL>"

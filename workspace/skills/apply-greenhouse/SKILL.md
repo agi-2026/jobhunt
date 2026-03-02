@@ -79,7 +79,7 @@ If no MyGreenhouse button: proceed to Phase 2.
 ### Phase 2: Fill Form
 Copy resume first:
 ```
-exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 ```
 Read `skills/apply-greenhouse/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="greenhouse"`.
 Load canonical JS via manifest immediately before evaluate:
@@ -113,11 +113,11 @@ Greenhouse uses button-based uploads ("Attach" button) with a hidden `input[type
 
 **Preferred method** — use `inputElement` from `fileUploadSelectors` (the hidden file input found by form-filler.js):
 ```
-browser action="upload" profile="greenhouse" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
+browser action="upload" profile="greenhouse" paths=["/Users/howard/.openclaw/uploads/Resume_Howard.pdf"] element="<inputElement from fileUploadSelectors>" timeoutMs=60000
 ```
 **Fallback** — if `inputElement` is null (no hidden input found), use the button ref:
 ```
-browser action="upload" profile="greenhouse" paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] ref="<attach-button-ref>" timeoutMs=60000
+browser action="upload" profile="greenhouse" paths=["/Users/howard/.openclaw/uploads/Resume_Howard.pdf"] ref="<attach-button-ref>" timeoutMs=60000
 ```
 
 **After upload, ALWAYS run verify-upload.js** to re-dispatch React events:

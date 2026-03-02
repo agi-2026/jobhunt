@@ -1,0 +1,9 @@
+{
+  "client_id": "YOUR_AZURE_APP_CLIENT_ID",
+  "tenant_id": "consumers",
+  "scopes": "Mail.ReadWrite Mail.Send User.Read offline_access",
+  "scan_defaults": {
+    "days": 7,
+    "max_results": 50
+  }
+}

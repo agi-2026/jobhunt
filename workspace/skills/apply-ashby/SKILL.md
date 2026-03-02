@@ -71,7 +71,7 @@ If mutual connections found, record them for manual follow-up notes.
 ### Phase 2: Fill Form
 Copy resume first:
 ```
-exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf /tmp/openclaw/uploads/
+exec: cp ~/.openclaw/workspace/resume/Resume_Howard.pdf ~/.openclaw/uploads/
 ```
 Read `skills/apply-ashby/scripts/form-filler.js` and run via browser `action="act"` with `request={"kind":"evaluate","fn":"...","timeoutMs":30000}` and `profile="ashby"`.
 Load canonical JS via manifest immediately before evaluate:
@@ -110,7 +110,7 @@ For EACH filled field with `method: "ashby-toggle-click"`:
 ### Phase 5: Resume Upload
 Use the upload action with ref from `fileUploadSelectors`:
 ```
-browser upload paths=["/tmp/openclaw/uploads/Resume_Howard.pdf"] inputRef="<ref>" timeoutMs=60000 profile="ashby"
+browser upload paths=["/Users/howard/.openclaw/uploads/Resume_Howard.pdf"] inputRef="<ref>" timeoutMs=60000 profile="ashby"
 ```
 If `fileUploadFound: false` or "file already uploaded" in skipped: skip this step.
 Never upload by typing a file path into a button/text input. Use the `browser upload` action only.

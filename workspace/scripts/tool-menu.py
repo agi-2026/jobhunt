@@ -57,7 +57,7 @@ MENU = {
             "example": {
                 "action": "upload",
                 "profile": "<ats-profile>",
-                "paths": ["/tmp/openclaw/uploads/Resume_Howard.pdf"],
+                "paths": ["/Users/howard/.openclaw/uploads/Resume_Howard.pdf"],
                 "element": "input[type=file]",
             },
         },

@@ -205,8 +205,22 @@ CURATED_FILES: List[Dict[str, Any]] = [
         "id": "soul_context",
         "path": "SOUL.md",
         "purpose": "Howard's persona, role-specific narrative answers, achievements, and communication guidelines.",
-        "profiles": ["apply-ashby", "apply-greenhouse", "apply-lever"],
+        "profiles": ["apply-ashby", "apply-greenhouse", "apply-lever", "outlook-assistant"],
         "tags": ["persona", "essays", "narrative", "application"],
+    },
+    {
+        "id": "outlook_skill",
+        "path": "skills/outlook-assistant/SKILL.md",
+        "purpose": "Outlook email assistant skill instructions and commands.",
+        "profiles": ["outlook-assistant"],
+        "tags": ["skill", "outlook", "email"],
+    },
+    {
+        "id": "outlook_heuristics",
+        "path": "skills/outlook-assistant/config/heuristics.json",
+        "purpose": "Email scanning priority rules and domain configuration.",
+        "profiles": ["outlook-assistant"],
+        "tags": ["config", "outlook", "heuristics"],
     },
 ]
 

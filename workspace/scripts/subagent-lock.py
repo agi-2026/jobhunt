@@ -30,8 +30,8 @@ LOCKS_DIR = os.path.join(
 # Per-slot TTL: Greenhouse uses Sonnet on complex forms (can take 20-30 min per session).
 # Ashby/Lever use Haiku and typically finish in 10-15 min.
 SLOT_STALE_SECONDS = {
-    "ashby":      15 * 60,   # 15 min
-    "ashby2":     15 * 60,   # 15 min
+    "ashby":      30 * 60,   # 30 min (complex forms can take 15-25 min)
+    "ashby2":     30 * 60,   # 30 min
     "greenhouse": 45 * 60,   # 45 min (30 min subagent timeout + 15 min buffer)
     "lever":      15 * 60,   # 15 min
 }

@@ -86,6 +86,10 @@ COMPANY_INFO = {
     'wisdomai': {'name': 'WisdomAI', 'info': 'LLM-based code generation and document understanding', 'score': 80, 'h1b': 'Likely'},
     'Hume': {'name': 'Hume AI', 'info': 'Empathic AI, speech-language models, RL from human feedback ($50M+)', 'score': 80, 'h1b': 'Likely'},
     'valence': {'name': 'Valence', 'info': 'AI coaching platform for enterprises (Series B)', 'score': 65, 'h1b': 'Likely'},
+    # Added 2026-02-22 (batch Lever discovery)
+    'spotify': {'name': 'Spotify', 'info': 'Audio streaming ($50B mcap), strong ML team (recommendations, audio AI)', 'score': 82, 'h1b': 'Confirmed'},
+    'plaid': {'name': 'Plaid', 'info': 'Fintech infrastructure ($13.4B), ML for fraud/risk', 'score': 75, 'h1b': 'Likely'},
+    'zilliz': {'name': 'Zilliz', 'info': 'Milvus vector database company, ML infrastructure', 'score': 72, 'h1b': 'Likely'},
 }
 
 def fetch_jobs(slug):
@@ -139,20 +143,40 @@ def recency_score(job):
 
 def match_score(title):
     """Score based on title match to preferences."""
-    title_lower = title.lower()
-    exact = ['research scientist', 'research engineer', 'founding engineer', 'ai team lead']
+    t = title.lower()
+
+    # Auto-skip tier
+    skip = ['mechanical engineer', 'electrical engineer', 'hardware engineer',
+            'solutions engineer', 'sales engineer', 'gtm engineer',
+            'data engineer', 'data scientist', 'full stack', 'fullstack', 'full-stack',
+            'frontend engineer', 'fleet safety', 'product manager', 'program manager']
+    if any(kw in t for kw in skip):
+        return 10
+
+    # Over-leveled titles — auto-skip (except "Member of Technical Staff" and "Founding")
+    is_mts = 'member of technical staff' in t
+    is_founding = 'founding' in t
+    if not is_mts and not is_founding:
+        if 'distinguished' in t: return 10
+        if 'senior staff' in t: return 10
+        if 'principal' in t: return 10
+        if 'staff ' in t and t.index('staff ') < len(t) // 2: return 10
+    if any(yr in t for yr in ['6+ year', '7+ year', '8+ year', '10+ year']): return 10
+
+    exact = ['research scientist', 'research engineer', 'founding engineer', 'ai team lead',
+             'member of technical staff']
     strong = ['ml engineer', 'machine learning engineer', 'ai engineer', 'applied scientist',
               'post-training', 'pre-training', 'rlhf', 'alignment']
-    partial = ['software engineer', 'data scientist', 'inference engineer']
+    partial = ['software engineer', 'inference engineer']
 
     for kw in exact:
-        if kw in title_lower:
+        if kw in t:
             return 100
     for kw in strong:
-        if kw in title_lower:
+        if kw in t:
             return 80
     for kw in partial:
-        if kw in title_lower:
+        if kw in t:
             return 60
     return 40
 
