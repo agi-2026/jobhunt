@@ -30,6 +30,7 @@ import sys
 import os
 import json
 import re
+import fcntl
 from datetime import datetime
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -195,51 +196,57 @@ def main():
     if company.lower() in SKIP_COMPANIES and job.get('autoApply', True):
         job['autoApply'] = False
 
-    # Parse current queue
-    preamble, do_not_apply, in_progress, pending_entries = parse_queue()
+    LOCK_PATH = os.path.join(WORKSPACE, '.queue.lock')
+    with open(LOCK_PATH, 'w') as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        try:
+            # Parse current queue (inside lock so we see latest state)
+            preamble, do_not_apply, in_progress, pending_entries = parse_queue()
 
-    # Check duplicate
-    if check_duplicate(url, company, title, pending_entries):
-        print(f"DUPLICATE — {company} — {title} already in queue")
-        sys.exit(0)
+            # Check duplicate
+            if check_duplicate(url, company, title, pending_entries):
+                print(f"DUPLICATE — {company} — {title} already in queue")
+                return
 
-    # Build new entry
-    new_entry = build_entry(job)
-    pending_entries.append((score, new_entry))
+            # Build new entry
+            new_entry = build_entry(job)
+            pending_entries.append((score, new_entry))
 
-    # Sort by score descending
-    pending_entries.sort(key=lambda x: x[0], reverse=True)
+            # Sort by score descending
+            pending_entries.sort(key=lambda x: x[0], reverse=True)
 
-    # Count pending
-    pending_count = len(pending_entries)
+            # Count pending
+            pending_count = len(pending_entries)
 
-    # Update stats in preamble
-    preamble_text = '\n'.join(preamble)
-    preamble_text = re.sub(
-        r'Pending: \d+',
-        f'Pending: {pending_count}',
-        preamble_text
-    )
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M CT')
-    preamble_text = re.sub(
-        r'Last Search: .*',
-        f'Last Search: {now_str}',
-        preamble_text
-    )
+            # Update stats in preamble
+            preamble_text = '\n'.join(preamble)
+            preamble_text = re.sub(
+                r'Pending: \d+',
+                f'Pending: {pending_count}',
+                preamble_text
+            )
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M CT')
+            preamble_text = re.sub(
+                r'Last Search: .*',
+                f'Last Search: {now_str}',
+                preamble_text
+            )
 
-    # Rebuild queue file
-    output = preamble_text + '\n'
-    output += '\n'.join(do_not_apply) + '\n'
-    output += '\n'.join(in_progress) + '\n'
-    output += '\n## PENDING (sorted by priority score, highest first)\n\n'
+            # Rebuild queue file
+            output = preamble_text + '\n'
+            output += '\n'.join(do_not_apply) + '\n'
+            output += '\n'.join(in_progress) + '\n'
+            output += '\n## PENDING (sorted by priority score, highest first)\n\n'
 
-    for _, block in pending_entries:
-        output += block + '\n\n'
+            for _, block in pending_entries:
+                output += block + '\n\n'
 
-    with open(QUEUE_PATH, 'w') as f:
-        f.write(output)
+            with open(QUEUE_PATH, 'w') as f:
+                f.write(output)
 
-    print(f"ADDED [{score}] {company} — {title} ({pending_count} pending)")
+            print(f"ADDED [{score}] {company} — {title} ({pending_count} pending)")
+        finally:
+            fcntl.flock(lockf, fcntl.LOCK_UN)
 
 if __name__ == '__main__':
     main()

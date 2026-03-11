@@ -115,6 +115,12 @@ def fetch_jobs(slug):
     except URLError as e:
         print(f'ERROR: Network error — {e.reason}')
         return []
+    except TimeoutError:
+        print(f'ERROR: Timeout fetching {slug} — skipping')
+        return []
+    except OSError as e:
+        print(f'ERROR: OS error fetching {slug} — {e}')
+        return []
 
 def is_relevant(job):
     """Check if job title/team matches AI/ML keywords."""
