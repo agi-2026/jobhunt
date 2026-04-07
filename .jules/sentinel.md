@@ -1,0 +1,4 @@
+## 2025-05-15 - [SSRF and Insecure SSL Verification]
+**Vulnerability:** Multiple scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) were explicitly disabling SSL/TLS certificate verification and hostname checking (`ssl.CERT_NONE` and `check_hostname = False`). Additionally, `preflight-check.py` lacked protocol validation for input URLs.
+**Learning:** This pattern was likely copied across scripts to bypass certificate issues in development or for specific servers, but it introduced critical risks of Man-in-the-Middle (MITM) attacks and Server-Side Request Forgery (SSRF) using protocols like `file://`.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) without overrides. Strictly validate URL protocols to `http://` or `https://` before making network requests.
