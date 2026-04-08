@@ -14,8 +14,6 @@ import urllib.error
 import ssl
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -191,6 +189,10 @@ def main():
         sys.exit(1)
 
     url = sys.argv[1].strip()
+    if not url.startswith(("http://", "https://")):
+        print("DEAD Invalid URL protocol")
+        sys.exit(0)
+
     status, reason = check_url(url)
     print(f"{status} {reason}")
 
