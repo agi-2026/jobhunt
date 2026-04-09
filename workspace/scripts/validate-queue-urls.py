@@ -6,13 +6,14 @@ Output: JSON list of {url, company, title, status, reason}
 
 import re
 import sys
+import os
 import json
 import urllib.request
 import urllib.error
 import ssl
 import time
 
-QUEUE_PATH = "/Users/howard/.openclaw/workspace/job-queue.md"
+QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
 
 # Keywords that indicate a generic careers/404 page (not a specific job)
 DEAD_INDICATORS = [
@@ -76,8 +77,6 @@ def parse_queue():
 def check_url(url, timeout=15):
     """Check if URL points to a live job posting. Returns (status, reason)."""
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
