@@ -1,0 +1,4 @@
+## 2025-04-10 - Secure SSL Context and Protocol Validation
+**Vulnerability:** Multiple scripts (`preflight-check.py`, `batch-preflight.py`, `validate-queue-urls.py`, `clean-queue.py`) were using `ssl.CERT_NONE` and `check_hostname = False`, making them vulnerable to MITM attacks. Additionally, they lacked protocol validation, allowing SSRF (e.g., via `file://`).
+**Learning:** Python's `urllib.request` handles various protocols by default, including `file://`, which can lead to local file disclosure if user-provided URLs are not strictly validated. The codebase had a pattern of disabling SSL verification, likely to avoid issues with misconfigured servers or self-signed certificates.
+**Prevention:** Always use `ssl.create_default_context()` without disabling verification. Strictly validate URL protocols to `http://` or `https://` using regex before processing them with `urllib`.
