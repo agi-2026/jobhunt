@@ -1,0 +1,4 @@
+## 2026-02-14 - SSRF and MITM Vulnerabilities in URL Validation Scripts
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) were explicitly disabling SSL certificate verification and lacked protocol validation. This allowed for potential Man-in-the-Middle (MITM) attacks and Server-Side Request Forgery (SSRF) via the `file://` scheme.
+**Learning:** A recurring pattern in this repository was the use of `ssl.CERT_NONE` and `check_hostname = False` in Python scripts using `urllib.request` to bypass certificate issues, likely for development speed. Additionally, none of the scripts validated that URLs were using `http` or `https` before making network requests.
+**Prevention:** Always use default secure SSL contexts with certificate verification enabled. Explicitly validate URL protocols using strict regex (e.g., `^https?://`) before initiating any network request in utility scripts.
