@@ -1,0 +1,4 @@
+## 2025-01-24 - [SSL Verification and SSRF in Utility Scripts]
+**Vulnerability:** Multiple Python utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) were explicitly disabling SSL certificate verification and lacked strict URL protocol validation.
+**Learning:** A recurring pattern of `ctx.verify_mode = ssl.CERT_NONE` was found, likely to bypass local certificate issues, which exposes the application to Man-in-the-Middle (MITM) attacks. Additionally, using `urllib.request` without protocol validation allowed for potential SSRF/local file disclosure via `file://` or other schemes.
+**Prevention:** Always use `ssl.create_default_context()` without downgrading security settings. Synchronize and enforce strict `^https?://` protocol validation across all entry points that handle URLs.
