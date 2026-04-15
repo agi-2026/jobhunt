@@ -1,0 +1,4 @@
+## 2026-02-14 - [Insecure SSL and SSRF Vulnerabilities in Preflight Scripts]
+**Vulnerability:** Multiple Python utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) explicitly disabled SSL certificate verification (`ssl.CERT_NONE`) and lacked URL protocol validation.
+**Learning:** This pattern likely emerged to bypass certificate issues during development but created a significant MITM risk. Additionally, `urllib.request` without protocol validation is vulnerable to SSRF via `file://` or other schemes.
+**Prevention:** Always use `ssl.create_default_context()` without disabling verification. Enforce strict `^https?://` protocol validation for all user-supplied or external URLs using regex before processing. Use `os.path.expanduser` instead of hardcoded home directories to avoid leakage and improve portability.

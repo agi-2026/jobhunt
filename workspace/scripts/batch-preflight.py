@@ -29,10 +29,8 @@ QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
 SCRIPTS_DIR = os.path.dirname(os.path.realpath(__file__))
 LOCK_PATH = os.path.expanduser("~/.openclaw/workspace/.queue.lock")
 
-# SSL context for API calls
+# ✅ SECURITY: Use default secure context with certificate verification enabled
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -298,6 +296,13 @@ def main():
                 break
 
             url = job["url"]
+
+            # ✅ SECURITY: Strict protocol validation to prevent SSRF
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                print(f"  [{i+1}/{len(jobs)}] DEAD: {job['company']} — {job['title']} (Invalid protocol)", file=sys.stderr)
+                if args.remove:
+                    remove_from_queue(url)
+                continue
             company = job["company"]
             title = job["title"]
 
