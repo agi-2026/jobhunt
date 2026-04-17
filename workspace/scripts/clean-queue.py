@@ -2,15 +2,20 @@
 """Clean expired/dead jobs from the queue by checking URLs."""
 import re, sys, subprocess, time, urllib.request, urllib.error, ssl
 
-QUEUE_PATH = "/Users/howard/.openclaw/workspace/job-queue.md"
+import os
+QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
 
 def check_url(url, timeout=10):
     """Returns (alive, status_code, reason)"""
-    if not url.startswith("http"):
-        url = "https://" + url
+    # Security: strict protocol validation
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        # Auto-prefix bare domains for usability if they look like domains
+        if not "://" in url and "." in url.split("/")[0]:
+            url = "https://" + url
+        else:
+            return (False, 400, "Invalid protocol")
+
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, method='HEAD', headers={
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
     })
