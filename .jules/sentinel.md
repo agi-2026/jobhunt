@@ -1,0 +1,4 @@
+## 2026-04-18 - [SSR and MITM via Insecure SSL and Missing Protocol Validation]
+**Vulnerability:** Several Python scripts used `urllib.request` with SSL verification disabled (`ssl.CERT_NONE`) and lacked protocol validation on user-supplied or queue-sourced URLs. This exposed the system to MITM attacks and SSRF/local file disclosure (e.g., using `file://` schemes).
+**Learning:** Utilities often trade security for "it just works" convenience, especially in scraping/preflight contexts. Hardcoded paths also reduced portability and security in shared environments.
+**Prevention:** Always use default secure SSL contexts. Implement strict `^https?://` protocol validation for any URL-fetching logic to prevent cross-protocol attacks. Use `os.path.expanduser` for workspace paths instead of hardcoded home directories.
