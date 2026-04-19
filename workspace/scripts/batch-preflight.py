@@ -31,8 +31,6 @@ LOCK_PATH = os.path.expanduser("~/.openclaw/workspace/.queue.lock")
 
 # SSL context for API calls
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -301,7 +299,11 @@ def main():
             company = job["company"]
             title = job["title"]
 
-            status, reason = check_url(url)
+            # Security: Strict protocol validation to prevent SSRF
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                status, reason = "DEAD", "Invalid protocol (only http/https allowed)"
+            else:
+                status, reason = check_url(url)
 
             if status == "DEAD":
                 all_dead.append({**job, "reason": reason})
