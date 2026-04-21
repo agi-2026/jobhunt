@@ -1,0 +1,4 @@
+## 2026-02-22 - [SSRF and MITM via Insecure SSL Contexts and Missing Protocol Validation]
+**Vulnerability:** Multiple Python utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) were using `ssl.CERT_NONE` and lacked strict URL protocol validation. This exposed the application to MITM attacks and SSRF/Local File Disclosure (e.g., via `file://` scheme).
+**Learning:** A recurring pattern of disabling SSL verification for "convenience" in internal scripts often leads to security regressions. Combining this with unvalidated user-controlled URLs creates a high-risk SSRF vector.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and enforce strict protocol whitelisting (e.g., `^https?://`) for all network-requesting utilities.
