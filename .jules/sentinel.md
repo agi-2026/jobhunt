@@ -1,0 +1,4 @@
+## 2026-02-12 - [SSL/TLS and SSRF Remediation]
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) explicitly disabled SSL certificate verification (e.g., `ssl.CERT_NONE`) and lacked protocol validation for user-supplied URLs.
+**Learning:** Developers often disable SSL verification to bypass local development hurdles or certificate issues with specific job boards, but this exposes the system to Man-in-the-Middle (MITM) attacks. Lack of protocol validation allows Server-Side Request Forgery (SSRF) and local file disclosure via schemes like `file://`.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and strictly validate URL protocols against an allowlist (e.g., `^https?://`) before processing them in automated crawlers or validators.
