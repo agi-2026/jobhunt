@@ -1,0 +1,4 @@
+## 2026-02-12 - [SSL Verification and SSRF Protections]
+**Vulnerability:** Multiple utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) were explicitly disabling SSL certificate verification and lacked protocol validation.
+**Learning:** A recurring pattern in this repository was setting `verify_mode = ssl.CERT_NONE` to bypass certificate errors, likely for development convenience, which introduced MITM risks. Additionally, `urllib.request.urlopen` was vulnerable to SSRF via `file://` and other protocols.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and strictly validate URL protocols (e.g., using `^https?://`) before performing network requests. Avoid hardcoded absolute paths that include local usernames; use `os.path.expanduser` instead.
