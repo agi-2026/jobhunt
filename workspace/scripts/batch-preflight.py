@@ -31,8 +31,6 @@ LOCK_PATH = os.path.expanduser("~/.openclaw/workspace/.queue.lock")
 
 # SSL context for API calls
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -42,6 +40,8 @@ HEADERS = {
 
 def api_get(url, timeout=10):
     """Make a GET request and return (status_code, body_json_or_none)."""
+    if not re.match(r"^https?://", url, re.I):
+        return -1, None
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         resp = urllib.request.urlopen(req, timeout=timeout, context=CTX)
