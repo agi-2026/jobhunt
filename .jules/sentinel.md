@@ -1,0 +1,4 @@
+## 2026-02-12 - Insecure SSL Contexts and SSRF in Preflight Scripts
+**Vulnerability:** Multiple Python utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) were explicitly disabling SSL certificate verification (`ssl.CERT_NONE`) and lacked strict protocol validation for user-provided URLs.
+**Learning:** Explicitly disabling SSL is a dangerous pattern often used during development to bypass environment-specific certificate issues, but it leaves the application vulnerable to MITM attacks. Furthermore, `urllib.request` automatically handles various protocols including `file://`, which leads to Local File Disclosure (LFD) if the input URL is not strictly filtered to `http/https`.
+**Prevention:** Always use `ssl.create_default_context()` for network requests and enforce strict protocol validation (e.g., `re.match(r'^https?://', url, re.I)`) before processing any external URL.
