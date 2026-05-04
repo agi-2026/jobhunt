@@ -1,0 +1,4 @@
+## 2025-05-15 - [SSRF and MITM in Python Utility Scripts]
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) used `urllib.request.urlopen` with an insecure SSL context (`ssl.CERT_NONE`) and lacked protocol validation, enabling SSRF (e.g., via `file://`) and MITM attacks.
+**Learning:** Explicitly disabling SSL certificate verification is a dangerous development pattern likely used to bypass local certificate issues, which must be avoided in favor of default secure contexts. Lack of protocol validation in network-requesting scripts is a common source of SSRF.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and strictly validate URL protocols (e.g., `^https?://`) before making network requests.
