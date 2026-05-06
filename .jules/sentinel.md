@@ -1,0 +1,4 @@
+## 2025-05-14 - Remediated MITM and SSRF vulnerabilities in utility scripts
+**Vulnerability:** Multiple Python scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, and `validate-queue-urls.py`) were explicitly disabling SSL certificate verification (`ssl.CERT_NONE`) and hostname checking, making them vulnerable to Man-in-the-Middle (MITM) attacks. Additionally, `preflight-check.py` lacked protocol validation, allowing potential SSRF via `file://` or other schemes.
+**Learning:** Developers sometimes disable SSL verification to quickly bypass local certificate issues, creating a recurring pattern of insecurity that propagates through copy-pasting utility code.
+**Prevention:** Always use `ssl.create_default_context()` and avoid overriding `verify_mode` or `check_hostname`. Implement strict protocol validation (`^https?://`) for any user-supplied URLs passed to network-requesting functions.
