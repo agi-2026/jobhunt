@@ -1,0 +1,4 @@
+## 2026-05-07 - Explicit SSL Disabling and SSRF Protocol Risks
+**Vulnerability:** Multiple Python utility scripts (preflight-check, batch-preflight, clean-queue, validate-queue) explicitly disabled SSL certificate verification using `ssl.CERT_NONE` and lacked URL protocol validation, allowing `file://` or other non-HTTP schemes.
+**Learning:** Developers often disable SSL verification to bypass local environment certificate issues or to speed up development, but this leaves the application vulnerable to MITM attacks. Lack of protocol validation in scripts using `urllib` can lead to SSRF and local file disclosure.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and strictly validate URL protocols against a whitelist (e.g., `^https?://`) before making network requests.
