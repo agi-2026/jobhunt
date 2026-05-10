@@ -1,0 +1,4 @@
+## 2025-05-22 - [SSRF and MITM in Utility Scripts]
+**Vulnerability:** Utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) were explicitly disabling SSL certificate verification (`ssl.CERT_NONE`) and hostname checking. Additionally, they lacked strict protocol validation for user-provided URLs, allowing schemes like `file://`.
+**Learning:** This pattern was likely used to bypass local certificate issues during development but leaves the system vulnerable to MITM attacks and SSRF/Local File Disclosure. Even "small" utility scripts that make network requests must follow secure-by-default practices.
+**Prevention:** Always use `ssl.create_default_context()` without insecure overrides. Strictly validate URL protocols using a regex like `^https?://` before passing them to network libraries like `urllib`.
