@@ -615,8 +615,8 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    if not re.match(r"^https?://", url, re.I):
+        return {"ok": False, "error": "URL must start with http/https"}
 
     info = extract_from_url(url)
     company = info["company"]
