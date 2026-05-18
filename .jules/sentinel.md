@@ -1,0 +1,4 @@
+## 2026-02-18 - SSRF and MITM remediation via Protocol Validation and Secure SSL Context
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `clean-queue.py`, etc.) explicitly disabled SSL certificate verification and lacked protocol validation for URLs, allowing for potential MITM attacks and SSRF/local file disclosure via the `file://` scheme.
+**Learning:** Disabling SSL verification (`ssl.CERT_NONE`) is a common but dangerous development pattern used to bypass local certificate issues, which often remains in production-ready scripts. Combined with unvalidated URL schemes, it creates a significant SSRF vector.
+**Prevention:** Always use default secure SSL contexts and strictly validate URL protocols (using `^https?://`) before initiating network requests in scripts that handle user-controlled URLs. Ensure validation is consistent between frontend and backend.
