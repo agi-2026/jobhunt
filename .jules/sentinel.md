@@ -1,0 +1,4 @@
+## 2026-02-12 - [SSL/TLS and SSRF Security Remediation]
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) were explicitly disabling SSL certificate verification (`ssl.CERT_NONE`) and lacked strict URL protocol validation, creating MITM and SSRF risks.
+**Learning:** Explicitly disabling SSL is a dangerous development pattern likely used to bypass local certificate issues, which must be avoided in favor of default secure contexts. Lack of protocol validation in scripts using `urllib.request` can lead to local file disclosure via `file://`.
+**Prevention:** Always use `ssl.create_default_context()` without overriding `verify_mode`. Strictly validate URL protocols using regex (e.g., `^https?://`) before making network requests.
