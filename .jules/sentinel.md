@@ -1,0 +1,4 @@
+## 2025-05-15 - SSL Verification and URL Protocol Enforcement
+**Vulnerability:** Multiple utility scripts explicitly disabled SSL certificate verification (`ssl.CERT_NONE`) and used loose string matching for URL protocol validation, creating risks for Man-in-the-Middle (MITM) and Server-Side Request Forgery (SSRF) attacks.
+**Learning:** Insecure SSL configurations are often introduced to bypass local environment issues but frequently leak into production-ready scripts. Loose protocol checks (like `.startswith("http")`) are insufficient against URI schemes like `file://` or `gopher://`.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and enforce strict protocol validation using regex (`^https?://`) for any user-controlled URL input. Ensure all network-requesting components adhere to these standards.

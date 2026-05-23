@@ -615,8 +615,8 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    if not re.match(r"^https?://", url, re.I):
+        return {"ok": False, "error": "URL must start with http/https"}
 
     info = extract_from_url(url)
     company = info["company"]
@@ -1182,7 +1182,7 @@ async function addJob(dest) {
   const input = document.getElementById('add-url');
   const url = input.value.trim();
   if (!url) { toast('Paste a URL first', 1); return; }
-  if (!url.startsWith('http')) { toast('URL must start with http', 1); return; }
+  if (!/^https?:\/\//i.test(url)) { toast('URL must start with http/https', 1); return; }
   const action = dest === 'applied' ? 'Mark as applied' : 'Add to queue';
   if (!confirm(action + '?\n' + url)) return;
   try {
