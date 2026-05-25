@@ -1,0 +1,4 @@
+## 2026-02-12 - Insecure SSL Contexts and SSRF in Utility Scripts
+**Vulnerability:** Multiple Python utility scripts (preflight-check.py, batch-preflight.py, etc.) explicitly disabled SSL certificate verification by setting `verify_mode = ssl.CERT_NONE`. Additionally, these scripts lacked strict URL protocol validation, allowing schemes like `file://` to be processed.
+**Learning:** Explicitly disabling SSL is a common but dangerous development pattern used to bypass local environment or proxy issues. When combined with utility scripts that fetch arbitrary URLs, it opens the door to Man-in-the-Middle (MITM) attacks and Server-Side Request Forgery (SSRF) / Local File Disclosure (LFD).
+**Prevention:** Always use `ssl.create_default_context()` without overriding `verify_mode`. Implement strict regex-based protocol validation (e.g., `^https?://`) for all user-supplied or external URLs before processing them with `urllib` or similar libraries.
