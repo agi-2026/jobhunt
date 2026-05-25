@@ -6,11 +6,16 @@ QUEUE_PATH = "/Users/howard/.openclaw/workspace/job-queue.md"
 
 def check_url(url, timeout=10):
     """Returns (alive, status_code, reason)"""
-    if not url.startswith("http"):
+    # ✅ SECURITY: Ensure we have a protocol, defaulting to https if missing,
+    # then strictly validate to prevent SSRF via other schemes.
+    if not re.search(r"^[a-z0-9+.-]+://", url, re.I):
         url = "https://" + url
+
+    if not re.match(r"^https?://", url, re.I):
+        return (False, 0, "Invalid protocol (must be http/https)")
+
+    # ✅ SECURITY: Use default secure context to ensure SSL certificate verification
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, method='HEAD', headers={
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
     })
