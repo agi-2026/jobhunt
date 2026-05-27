@@ -1,0 +1,4 @@
+## 2025-05-14 - [Critical] Insecure SSL Context and Protocol Validation (SSRF/LFD)
+**Vulnerability:** Multiple utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) explicitly disabled SSL certificate verification (ssl.CERT_NONE) and lacked strict URL protocol validation, allowing file:// protocol access.
+**Learning:** Development-time shortcuts for bypassing local certificate issues led to a systemic vulnerability where MitM protection was disabled and local file disclosure was possible via the dashboard and preflight scripts.
+**Prevention:** Always use default secure SSL contexts (ssl.create_default_context()) and strictly validate URL protocols using regex (e.g., ^https?://) in both frontend and backend before any network request or file processing.
