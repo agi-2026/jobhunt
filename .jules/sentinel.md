@@ -1,0 +1,4 @@
+## 2025-05-22 - Insecure SSL/TLS Verification and SSRF via Loose Protocol Validation
+**Vulnerability:** Multiple Python utility scripts explicitly disabled SSL certificate verification (using `ssl.CERT_NONE`) and lacked strict URL protocol validation, allowing SSRF/Local File Disclosure (LFD) via the `file://` scheme.
+**Learning:** Explicitly disabling SSL verification is a dangerous pattern often used as a shortcut for certificate issues during development, but it leaves the application vulnerable to MITM. Combined with loose `startswith("http")` checks, the system could be tricked into reading local files or internal services.
+**Prevention:** Always use default secure SSL contexts (`ssl.create_default_context()`) and enforce strict URL protocol validation using regex (e.g., `^https?://`) for all network-bound requests.
