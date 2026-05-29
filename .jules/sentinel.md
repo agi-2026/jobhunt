@@ -1,0 +1,4 @@
+## 2026-02-14 - Insecure SSL Contexts and Missing Protocol Validation
+**Vulnerability:** Multiple utility scripts (preflight-check.py, batch-preflight.py, clean-queue.py, validate-queue-urls.py) explicitly disabled SSL certificate verification using `ssl.CERT_NONE` and lacked protocol validation for URLs, enabling both MITM attacks and SSRF/Local File Disclosure (e.g., via `file://`).
+**Learning:** Explicitly disabling SSL is a dangerous development pattern likely used to bypass local certificate issues, and relying on `urllib.request` without explicit protocol checks allows for non-HTTP schemes to be processed.
+**Prevention:** Always use `ssl.create_default_context()` for secure communication and implement strict protocol validation (e.g., regex `^https?://`) before processing user-supplied URLs in network-requesting scripts.
