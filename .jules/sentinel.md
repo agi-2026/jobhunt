@@ -1,0 +1,4 @@
+## 2026-02-27 - Insecure SSL Context and SSRF in Utility Scripts
+**Vulnerability:** Explicitly disabling SSL certificate verification (`verify_mode = ssl.CERT_NONE`) and missing URL protocol validation in Python utility scripts using `urllib.request`.
+**Learning:** Development-time convenience (bypassing local certificate issues) led to a pattern of insecure SSL contexts across multiple scripts. Additionally, the lack of protocol validation allowed for Server-Side Request Forgery (SSRF) and Local File Disclosure (LFD) via the `file://` scheme.
+**Prevention:** Always use `ssl.create_default_context()` for network requests and strictly validate URL protocols (e.g., `^https?://`) before initiating connections or processing URLs. Avoid hardcoded home directory paths to ensure consistent behavior across environments.
