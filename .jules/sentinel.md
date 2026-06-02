@@ -1,0 +1,4 @@
+## 2025-05-15 - Widespread Insecure SSL Verification and SSRF via Protocol Injection
+**Vulnerability:** Multiple Python utility scripts (preflight-check.py, clean-queue.py, etc.) explicitly disabled SSL certificate verification (ssl.CERT_NONE) and lacked protocol validation for URLs, allowing for Man-in-the-Middle (MITM) attacks and Server-Side Request Forgery (SSRF)/Local File Disclosure (LFD) via the file:// scheme.
+**Learning:** Development-time convenience (bypassing SSL errors) often leads to persistent security gaps. Insecure patterns like disabling SSL verification tend to be copied across multiple utility scripts within the same project.
+**Prevention:** Always use default secure SSL contexts. Implement strict URL protocol validation (whitelist http/https) at the earliest possible entry point for any tool that fetches remote or local resources based on user-controlled input.
