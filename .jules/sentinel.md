@@ -1,0 +1,4 @@
+## 2026-06-03 - [SSRF/LFD and MITM in Utility Scripts]
+**Vulnerability:** Multiple utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) and the dashboard server (`dashboard/server.py`) lacked strict protocol validation for URLs and explicitly disabled SSL certificate verification.
+**Learning:** Development-time convenience (bypassing local certificate issues) often leads to persistent `ssl.CERT_NONE` configurations in production-adjacent scripts. Using `startswith("http")` is insufficient for URL safety as it allows `file://` or other internal schemes via `http` prefixes or malformed strings in some libraries, though `urllib.request` is stricter, explicit regex is safer.
+**Prevention:** Always use `ssl.create_default_context()` without overrides for production code. Implement strict `^https?://` regex validation for all user-supplied URLs before processing them with network libraries.
