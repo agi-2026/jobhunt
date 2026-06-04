@@ -1,0 +1,4 @@
+## 2026-02-12 - [MITM and SSRF Vulnerabilities in Utility Scripts]
+**Vulnerability:** Explicit disabling of SSL certificate verification (`ssl.CERT_NONE`) and insufficient URL protocol validation (using `.startswith("http")` instead of strict regex) across multiple Python utility scripts and the dashboard.
+**Learning:** Development-time bypasses for SSL issues (like `CERT_NONE`) often leak into production and create critical MITM risks. Simple string prefix checks for URLs can be bypassed with other supported protocols (like `file://`) leading to SSRF or Local File Disclosure.
+**Prevention:** Always use default secure SSL contexts. Use strict regex (`^https?://`) for URL protocol validation and ensure this validation is synchronized between the frontend and backend. Always use `os.path.expanduser` instead of hardcoded home directory paths for security and portability.
