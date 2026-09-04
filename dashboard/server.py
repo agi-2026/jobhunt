@@ -9,11 +9,20 @@ Open: http://localhost:8765
 import http.server
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+SCRIPTS_DIR = WORKSPACE / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> bool:
+        return url.startswith("http://") or url.startswith("https://")
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
@@ -577,9 +586,6 @@ def update_stage(search_term: str, new_stage: str, url: str = "", company: str =
     return {"ok": True, "message": f"{match['company']} — {match['title']}: {old_stage} -> {new_stage}"}
 
 
-SCRIPTS_DIR = WORKSPACE / "scripts"
-
-
 def extract_from_url(url: str) -> dict:
     """Extract company and ATS type from a job URL."""
     info = {"company": "", "title": "", "ats": ""}
@@ -615,8 +621,8 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    if not is_safe_url(url):
+        return {"ok": False, "error": "Invalid or restricted URL (SSRF protection)"}
 
     info = extract_from_url(url)
     company = info["company"]
