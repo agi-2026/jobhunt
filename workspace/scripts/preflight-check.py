@@ -12,6 +12,18 @@ import json
 import urllib.request
 import urllib.error
 import ssl
+from pathlib import Path
+
+# Add scripts directory to path to import queue_utils
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.append(str(SCRIPT_DIR))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> bool:
+        return url.startswith("http://") or url.startswith("https://")
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
@@ -167,6 +179,9 @@ def check_url_html(url, timeout=10):
 
 def check_url(url, timeout=10):
     """Check URL: try ATS API first, fall back to HTML check."""
+    if not is_safe_url(url):
+        return "DEAD", "Invalid URL (loopback/internal blocked)"
+
     # Try ATS-specific API checks (fast, reliable, no JS needed)
     if "greenhouse.io" in url:
         result = check_greenhouse_api(url)
