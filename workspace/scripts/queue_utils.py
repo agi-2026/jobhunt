@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -129,6 +132,50 @@ def parse_queue_sections(content: str, no_auto_companies=None):
 def read_queue_sections(queue_path: str, lock_path: str, no_auto_companies=None):
     content = read_queue_content(queue_path, lock_path)
     return parse_queue_sections(content, no_auto_companies=no_auto_companies)
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL scheme and ensure target IP is public (SSRF prevention)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False, "Invalid URL format"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}' (only http/https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    if hostname.lower() in ("localhost", "0.0.0.0", "127.0.0.1", "::1"):
+        return False, "Loopback address blocked"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False, f"Could not resolve hostname '{hostname}'"
+    except Exception as e:
+        return False, f"DNS resolution error: {e}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Resolved to loopback address ({ip_str})"
+            if ip.is_link_local:
+                return False, f"Resolved to link-local address ({ip_str})"
+            if ip.is_private:
+                return False, f"Resolved to private IP ({ip_str})"
+            if ip.is_multicast:
+                return False, f"Resolved to multicast address ({ip_str})"
+            if ip.is_reserved:
+                return False, f"Resolved to reserved address ({ip_str})"
+        except ValueError:
+            return False, f"Invalid IP address format ({ip_str})"
+
+    return True, "OK"
 
 
 def filter_jobs(jobs, actionable_only=False, ats_filter=None):
