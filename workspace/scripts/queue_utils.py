@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,45 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> bool:
+    """Validate that a URL uses http/https scheme and does not resolve to local or private IP addresses (SSRF prevention)."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    try:
+        addresses = socket.getaddrinfo(hostname, None)
+    except Exception:
+        return False
+
+    if not addresses:
+        return False
+
+    for item in addresses:
+        ip_str = item[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if (
+                ip.is_loopback
+                or ip.is_private
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_reserved
+                or ip.is_unspecified
+            ):
+                return False
+        except ValueError:
+            return False
+
+    return True
