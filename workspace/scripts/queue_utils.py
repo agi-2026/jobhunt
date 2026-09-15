@@ -2,7 +2,45 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate that URL uses http/https and does not resolve to private/loopback/link-local IPs (SSRF protection)."""
+    if not url:
+        return False, "Empty URL"
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False, f"Invalid URL scheme ({parsed.scheme})"
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Missing hostname"
+
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False, "Could not resolve hostname"
+
+        for item in addr_info:
+            ip_str = item[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Invalid URL (loopback/internal blocked: {ip})"
+            if ip.is_link_local:
+                return False, f"Invalid URL (link-local blocked: {ip})"
+            if ip.is_private:
+                return False, f"Invalid URL (private IP blocked: {ip})"
+            if ip.is_multicast:
+                return False, f"Invalid URL (multicast blocked: {ip})"
+            if ip.is_reserved or ip.is_unspecified:
+                return False, f"Invalid URL (reserved blocked: {ip})"
+
+        return True, "URL is safe"
+    except Exception as e:
+        return False, f"Invalid URL ({str(e)})"
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
