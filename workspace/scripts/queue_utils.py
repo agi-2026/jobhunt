@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,47 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate that a URL uses http/https scheme and does not resolve to private/loopback/internal IPs."""
+    if not url:
+        return False, "URL is empty"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid scheme '{parsed.scheme}'. Only http and https are allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL missing host"
+
+    if hostname.lower() in ("localhost", "0.0.0.0"):
+        return False, f"Host '{hostname}' is a loopback/internal address"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False, f"Could not resolve host '{hostname}'"
+        for item in addr_info:
+            ip_str = item[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Resolved IP {ip_str} is a loopback address"
+            if ip.is_link_local:
+                return False, f"Resolved IP {ip_str} is a link-local address"
+            if ip.is_private:
+                return False, f"Resolved IP {ip_str} is a private network address"
+            if ip.is_multicast:
+                return False, f"Resolved IP {ip_str} is a multicast address"
+            if ip.is_unspecified:
+                return False, f"Resolved IP {ip_str} is an unspecified address"
+    except socket.gaierror as e:
+        return False, f"Failed to resolve host '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Validation error for '{hostname}': {e}"
+
+    return True, "Safe"
