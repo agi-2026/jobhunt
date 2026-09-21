@@ -7,8 +7,12 @@ Open: http://localhost:8765
 """
 
 import http.server
+import ipaddress
 import json
 import re
+import socket
+import sys
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -578,6 +582,31 @@ def update_stage(search_term: str, new_stage: str, url: str = "", company: str =
 
 
 SCRIPTS_DIR = WORKSPACE / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+local_scripts = Path(__file__).resolve().parent.parent / "workspace" / "scripts"
+if str(local_scripts) not in sys.path:
+    sys.path.insert(0, str(local_scripts))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> bool:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return False
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            addresses = socket.getaddrinfo(hostname, None)
+            for _, _, _, _, sockaddr in addresses:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                    return False
+            return True
+        except Exception:
+            return False
 
 
 def extract_from_url(url: str) -> dict:
@@ -615,8 +644,8 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    if not is_safe_url(url):
+        return {"ok": False, "error": "Invalid or unsafe URL (internal/loopback blocked)"}
 
     info = extract_from_url(url)
     company = info["company"]
