@@ -7,11 +7,36 @@ Output: ALIVE <reason> or DEAD <reason>
 """
 
 import sys
+import os
 import re
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
+import socket
+import ipaddress
 import ssl
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> bool:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return False
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            addresses = socket.getaddrinfo(hostname, None)
+            for _, _, _, _, sockaddr in addresses:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                    return False
+            return True
+        except Exception:
+            return False
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
@@ -167,6 +192,9 @@ def check_url_html(url, timeout=10):
 
 def check_url(url, timeout=10):
     """Check URL: try ATS API first, fall back to HTML check."""
+    if not is_safe_url(url):
+        return "DEAD", "Invalid URL (loopback/internal blocked)"
+
     # Try ATS-specific API checks (fast, reliable, no JS needed)
     if "greenhouse.io" in url:
         result = check_greenhouse_api(url)
