@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,51 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL scheme and resolve IP addresses to prevent SSRF vulnerabilities."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid or empty URL"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"URL parse error: {str(e)}"
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Unsupported scheme '{scheme}': only http and https allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False, f"Could not resolve hostname '{hostname}'"
+    except Exception as e:
+        return False, f"DNS resolution failed: {str(e)}"
+
+    if not addr_info:
+        return False, f"No IP addresses resolved for hostname '{hostname}'"
+
+    for family, socktype, proto, canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address returned: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Loopback address blocked: {ip_str}"
+        if ip.is_link_local:
+            return False, f"Link-local address blocked: {ip_str}"
+        if ip.is_private:
+            return False, f"Private IP address blocked: {ip_str}"
+        if ip.is_multicast:
+            return False, f"Multicast address blocked: {ip_str}"
+        if ip.is_reserved or ip.is_unspecified:
+            return False, f"Reserved or unspecified address blocked: {ip_str}"
+
+    return True, "URL is safe"
