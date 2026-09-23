@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Clean expired/dead jobs from the queue by checking URLs."""
-import re, sys, subprocess, time, urllib.request, urllib.error, ssl
+import os, re, sys, subprocess, time, urllib.request, urllib.error, ssl
+from queue_utils import is_safe_url
 
-QUEUE_PATH = "/Users/howard/.openclaw/workspace/job-queue.md"
+QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
 
 def check_url(url, timeout=10):
     """Returns (alive, status_code, reason)"""
     if not url.startswith("http"):
         url = "https://" + url
+    if not is_safe_url(url):
+        return (False, 400, "Invalid URL (loopback/internal blocked)")
+
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, method='HEAD', headers={
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
     })
@@ -31,8 +33,12 @@ def main():
     dry_run = "--dry-run" in sys.argv
     limit = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else 500
     
-    with open(QUEUE_PATH, "r") as f:
-        content = f.read()
+    try:
+        with open(QUEUE_PATH, "r") as f:
+            content = f.read()
+    except FileNotFoundError:
+        print("ERROR: Queue file not found", file=sys.stderr)
+        sys.exit(1)
     
     lines = content.split("\n")
     dead_jobs = []
