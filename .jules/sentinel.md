@@ -1,0 +1,4 @@
+## 2026-03-30 - SSRF Prevention & Strict SSL Enforcement in Preflight URL Checks
+**Vulnerability:** `workspace/scripts/preflight-check.py` disabled TLS certificate verification (`ssl.CERT_NONE`, `check_hostname = False`) and did not validate hostnames/IPs before fetching user-supplied or queue URLs, opening the application to Server-Side Request Forgery (SSRF) and MITM attacks.
+**Learning:** Outbound URL validation scripts must resolve hostnames to IP addresses and block loopback (`127.0.0.1`, `localhost`, `::1`), private (RFC 1918), link-local (`169.254.x.x`), multicast, and reserved ranges prior to establishing network connections.
+**Prevention:** Consolidate URL safety validation into a shared `is_safe_url` helper in `workspace/scripts/queue_utils.py` and enforce standard SSL certificate verification (`ssl.create_default_context()`).
