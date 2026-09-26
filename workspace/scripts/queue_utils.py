@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,50 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL for safe protocols and block internal/private/loopback/link-local/multicast IP addresses to prevent SSRF."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid or empty URL"
+    url_str = url.strip()
+    if not url_str:
+        return False, "Empty URL"
+    try:
+        parsed = urlparse(url_str)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Unsupported scheme: {scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    if hostname.lower() in ("localhost", "0.0.0.0"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return True, "DNS lookup failed, proceeding safely"
+    except Exception as e:
+        return False, f"DNS resolution error: {e}"
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback or ip.is_unspecified:
+                return False, "Invalid URL (loopback/internal blocked)"
+            if ip.is_link_local:
+                return False, "Invalid URL (link-local blocked)"
+            if ip.is_private:
+                return False, "Invalid URL (private IP blocked)"
+            if ip.is_multicast:
+                return False, "Invalid URL (multicast IP blocked)"
+        except ValueError:
+            continue
+
+    return True, "URL is safe"
