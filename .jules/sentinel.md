@@ -1,0 +1,4 @@
+## 2026-09-26 - Restricting Global Disabling of TLS Verification and Centralizing SSRF Protection
+**Vulnerability:** External HTTP fetching scripts globally disabled SSL/TLS certificate verification (`ssl.CERT_NONE` and `check_hostname = False`), exposing connections to MITM risks and permitting non-http protocols / internal loopback and metadata endpoint access (SSRF).
+**Learning:** Python's `urllib.request` defaults allow non-http schemes like `file://` if not restricted prior to request execution. Standardizing URL safety validation before network dispatch prevents SSRF and local resource access.
+**Prevention:** Always validate URL schemes and IP addresses against loopback/private/link-local ranges using `socket.getaddrinfo` and `ipaddress` before making HTTP calls, and rely on `ssl.create_default_context()` for secure TLS verification.
