@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,58 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL to prevent Server-Side Request Forgery (SSRF).
+
+    Checks scheme (http/https only) and resolves hostnames to verify that target IP addresses
+    are not loopback, private, link-local, or multicast/reserved.
+    Returns (is_safe, reason).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Empty or invalid URL type"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}'; only http/https allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in ("localhost", "localhost.localdomain") or hostname_lower.endswith(".localhost"):
+        return False, "Loopback domain blocked"
+
+    try:
+        # Resolve hostname to all associated IP addresses (both IPv4 and IPv6)
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"Cannot resolve hostname '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Hostname resolution error: {e}"
+
+    if not addr_info:
+        return False, f"No IP address found for hostname '{hostname}'"
+
+    for item in addr_info:
+        ip_str = item[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address format: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Resolved IP {ip_str} is a loopback address"
+        if ip.is_link_local:
+            return False, f"Resolved IP {ip_str} is a link-local address"
+        if ip.is_private:
+            return False, f"Resolved IP {ip_str} is a private address"
+        if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return False, f"Resolved IP {ip_str} is restricted/reserved"
+
+    return True, "URL is safe"
