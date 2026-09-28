@@ -2,13 +2,48 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety for SSRF protection and scheme restriction.
+
+    Blocks loopback, private IP ranges, link-local, multicast/reserved ranges,
+    and non-http/https schemes.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False, f"Invalid scheme: {parsed.scheme or 'none'}"
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Missing host in URL"
+
+        # Resolve hostname to all associated IPs (v4 & v6)
+        addr_info = socket.getaddrinfo(hostname, None)
+        for res in addr_info:
+            ip_str = res[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, "Invalid URL (loopback/internal blocked)"
+            if ip.is_link_local:
+                return False, "Invalid URL (link-local/internal blocked)"
+            if ip.is_private:
+                return False, "Invalid URL (private IP blocked)"
+            if ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+                return False, "Invalid URL (restricted IP range)"
+        return True, "OK"
+    except Exception as e:
+        return False, f"URL validation error: {str(e)}"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
