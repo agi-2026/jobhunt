@@ -2,13 +2,71 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety for SSRF prevention.
+
+    Returns (is_safe, reason). Validates protocol scheme and resolves hostnames
+    to verify target IPs are not loopback, private, link-local, or multicast.
+    """
+    if not url or not isinstance(url, str):
+        return False, "Empty or invalid URL type"
+
+    url = url.strip()
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as e:
+        return False, f"URL parsing error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid scheme: {parsed.scheme} (only http/https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    # Check if host is raw IP string
+    try:
+        ip = ipaddress.ip_address(hostname)
+        ips_to_check = [ip]
+    except ValueError:
+        # Resolve hostname via DNS
+        try:
+            addrs = socket.getaddrinfo(hostname, None)
+            ips_to_check = []
+            for addr in addrs:
+                ip_str = addr[4][0]
+                ips_to_check.append(ipaddress.ip_address(ip_str))
+        except Exception as e:
+            return False, f"DNS resolution failure for {hostname}: {e}"
+
+    if not ips_to_check:
+        return False, f"Could not resolve IP for {hostname}"
+
+    for ip in ips_to_check:
+        if ip.is_loopback:
+            return False, f"Loopback address blocked ({ip})"
+        if ip.is_link_local:
+            return False, f"Link-local address blocked ({ip})"
+        if ip.is_private:
+            return False, f"Private network address blocked ({ip})"
+        if ip.is_multicast:
+            return False, f"Multicast address blocked ({ip})"
+        if ip.is_reserved:
+            return False, f"Reserved IP range blocked ({ip})"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
