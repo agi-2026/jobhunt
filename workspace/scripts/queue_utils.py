@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,44 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety to prevent SSRF against internal/loopback/metadata endpoints."""
+    try:
+        url_str = (url or "").strip()
+        if not url_str:
+            return False, "URL is empty"
+
+        parsed = urllib.parse.urlparse(url_str)
+        if parsed.scheme not in ("http", "https"):
+            return False, f"Invalid URL scheme ({parsed.scheme}). Only http and https allowed."
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Invalid URL (no host)"
+
+        # Explicit loopback hostnames
+        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]") or hostname.startswith("["):
+            return False, "Invalid URL (loopback/internal blocked)"
+
+        # Resolve IP addresses for hostname
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+        except socket.gaierror:
+            return False, "Could not resolve hostname"
+
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, "Invalid URL (loopback address blocked)"
+            if ip.is_link_local:
+                return False, "Invalid URL (link-local address blocked)"
+            if ip.is_private:
+                return False, "Invalid URL (private IP address blocked)"
+            if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                return False, "Invalid URL (reserved IP address blocked)"
+
+        return True, "Safe URL"
+    except Exception as e:
+        return False, f"URL validation error: {str(e)}"

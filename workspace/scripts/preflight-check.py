@@ -7,11 +7,18 @@ Output: ALIVE <reason> or DEAD <reason>
 """
 
 import sys
+import os
 import re
 import json
 import urllib.request
 import urllib.error
 import ssl
+
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    is_safe_url = None
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
@@ -191,6 +198,12 @@ def main():
         sys.exit(1)
 
     url = sys.argv[1].strip()
+    if is_safe_url:
+        safe, safe_reason = is_safe_url(url)
+        if not safe:
+            print(f"DEAD Invalid URL ({safe_reason})")
+            sys.exit(0)
+
     status, reason = check_url(url)
     print(f"{status} {reason}")
 
