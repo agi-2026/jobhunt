@@ -613,7 +613,20 @@ def extract_from_url(url: str) -> dict:
 
 def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
+    import sys
     import subprocess
+
+    sys.path.append(str(WORKSPACE / "scripts"))
+    try:
+        from queue_utils import is_safe_url
+        safe, reason = is_safe_url(url)
+        if not safe:
+            return {"ok": False, "error": f"Invalid URL: {reason}"}
+    except Exception:
+        url_lower = (url or "").lower()
+        if "localhost" in url_lower or "127.0.0.1" in url_lower or "0.0.0.0" in url_lower:
+            return {"ok": False, "error": "Invalid URL (loopback/internal blocked)"}
+
     url = url.strip().rstrip("/")
     if not url.startswith("http"):
         return {"ok": False, "error": "URL must start with http"}
