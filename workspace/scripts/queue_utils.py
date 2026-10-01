@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,47 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate that a URL uses http/https scheme and does not resolve to private/loopback/link-local IPs."""
+    if not url:
+        return False, "Empty URL"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}'. Only http and https are allowed."
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"Could not resolve hostname '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Resolution error for '{hostname}': {e}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+
+        if ip.is_loopback:
+            return False, f"URL resolves to loopback IP address '{ip_str}'"
+        if ip.is_link_local:
+            return False, f"URL resolves to link-local IP address '{ip_str}'"
+        if ip.is_private:
+            return False, f"URL resolves to private IP address '{ip_str}'"
+        if ip.is_multicast:
+            return False, f"URL resolves to multicast IP address '{ip_str}'"
+        if ip.is_reserved:
+            return False, f"URL resolves to reserved IP address '{ip_str}'"
+
+    return True, "URL is safe"

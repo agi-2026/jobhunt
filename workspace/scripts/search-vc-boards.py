@@ -16,6 +16,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+from queue_utils import is_safe_url
+
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CHECK_DEDUP = os.path.join(SCRIPT_DIR, "check-dedup.py")
 ADD_TO_QUEUE = os.path.join(SCRIPT_DIR, "add-to-queue.py")
@@ -131,12 +133,18 @@ US_RE = re.compile(
 
 
 def fetch_text(url):
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        raise ValueError(f"Blocked unsafe URL '{url}': {reason}")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/json"})
     with urllib.request.urlopen(req, timeout=40) as resp:
         return resp.read().decode("utf-8", errors="ignore")
 
 
 def post_json(url, payload):
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        raise ValueError(f"Blocked unsafe URL '{url}': {reason}")
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
