@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,58 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety to prevent SSRF vulnerabilities.
+    Returns (is_safe, reason).
+    """
+    if not url:
+        return False, "Empty URL"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return False, f"Invalid scheme '{scheme}'. Only http and https are allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    # Check common loopback hostnames explicitly
+    if hostname.lower() in ("localhost", "0.0.0.0", "127.0.0.1", "::1"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    # Resolve IP addresses for hostname
+    try:
+        addrs = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False, f"Failed to resolve hostname '{hostname}'"
+    except Exception as e:
+        return False, f"DNS resolution error: {e}"
+
+    if not addrs:
+        return False, f"No IP addresses found for hostname '{hostname}'"
+
+    for addr in addrs:
+        ip_str = addr[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Invalid URL (loopback/internal blocked: {ip_str})"
+        if ip.is_link_local:
+            return False, f"Invalid URL (link-local blocked: {ip_str})"
+        if ip.is_private:
+            return False, f"Invalid URL (private network blocked: {ip_str})"
+        if ip.is_multicast:
+            return False, f"Invalid URL (multicast blocked: {ip_str})"
+        if ip.is_unspecified:
+            return False, f"Invalid URL (unspecified IP blocked: {ip_str})"
+
+    return True, "URL is safe"

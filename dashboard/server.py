@@ -9,6 +9,7 @@ Open: http://localhost:8765
 import http.server
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -578,6 +579,20 @@ def update_stage(search_term: str, new_stage: str, url: str = "", company: str =
 
 
 SCRIPTS_DIR = WORKSPACE / "scripts"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FALLBACK_SCRIPTS_DIR = REPO_ROOT / "workspace" / "scripts"
+
+for s_dir in (SCRIPTS_DIR, FALLBACK_SCRIPTS_DIR):
+    if s_dir.exists() and str(s_dir) not in sys.path:
+        sys.path.insert(0, str(s_dir))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str):
+        if not url or not url.startswith(("http://", "https://")):
+            return False, "Invalid scheme or empty URL"
+        return True, "URL structure ok"
 
 
 def extract_from_url(url: str) -> dict:
@@ -615,8 +630,9 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Security restriction: {reason}"}
 
     info = extract_from_url(url)
     company = info["company"]
