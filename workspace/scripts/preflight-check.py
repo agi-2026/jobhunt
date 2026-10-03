@@ -12,10 +12,11 @@ import json
 import urllib.request
 import urllib.error
 import ssl
+import os
+from queue_utils import is_safe_url
 
+# Standard SSL context enforcing default verification
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -191,6 +192,11 @@ def main():
         sys.exit(1)
 
     url = sys.argv[1].strip()
+    safe, msg = is_safe_url(url)
+    if not safe:
+        print(f"DEAD {msg}")
+        sys.exit(0)
+
     status, reason = check_url(url)
     print(f"{status} {reason}")
 
