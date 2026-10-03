@@ -9,11 +9,23 @@ Open: http://localhost:8765
 import http.server
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# Ensure workspace/scripts is in sys.path for queue_utils import
+for p in [WORKSPACE / "scripts", REPO_ROOT / "workspace" / "scripts"]:
+    if str(p) not in sys.path and p.exists():
+        sys.path.append(str(p))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    is_safe_url = None
+
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
@@ -617,6 +629,11 @@ def add_job(url: str, destination: str = "queue") -> dict:
     url = url.strip().rstrip("/")
     if not url.startswith("http"):
         return {"ok": False, "error": "URL must start with http"}
+
+    if is_safe_url:
+        safe, msg = is_safe_url(url)
+        if not safe:
+            return {"ok": False, "error": f"Invalid URL: {msg}"}
 
     info = extract_from_url(url)
     company = info["company"]
