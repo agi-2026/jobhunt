@@ -2,13 +2,63 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL scheme and ensure target IP is not private/loopback/internal (SSRF protection)."""
+    if not url:
+        return False, "Empty URL"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}'. Only http and https allowed."
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    # Explicit check for common loopback hostnames
+    if hostname.lower() in ("localhost", "localhost.localdomain"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        # Unable to resolve hostname
+        return False, f"Cannot resolve hostname: {hostname}"
+    except Exception as e:
+        return False, f"Host resolution failed: {e}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, "Invalid URL (loopback/internal blocked)"
+            if ip.is_link_local:
+                return False, f"Blocked link-local address: {ip_str}"
+            if ip.is_private:
+                return False, f"Blocked private IP address: {ip_str}"
+            if ip.is_reserved or ip.is_multicast:
+                return False, f"Blocked reserved/multicast IP: {ip_str}"
+        except ValueError:
+            return False, f"Invalid IP address format: {ip_str}"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
