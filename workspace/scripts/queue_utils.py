@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,57 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety for SSRF prevention.
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url:
+        return False, "Empty URL"
+
+    raw_url = url.strip()
+    parsed = urlparse(raw_url)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Invalid scheme '{scheme}' (only http and https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    hostname_clean = hostname.strip("[]").lower()
+
+    if hostname_clean in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname_clean, None)
+    except socket.gaierror as e:
+        return False, f"Could not resolve hostname '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Resolution error for '{hostname}': {e}"
+
+    if not addr_info:
+        return False, f"No IP addresses resolved for '{hostname}'"
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback:
+            return False, "Invalid URL (loopback/internal blocked)"
+        if ip.is_link_local:
+            return False, f"Blocked link-local address: {ip_str}"
+        if ip.is_private:
+            return False, f"Blocked private network address: {ip_str}"
+        if ip.is_multicast:
+            return False, f"Blocked multicast address: {ip_str}"
+        if ip.is_reserved:
+            return False, f"Blocked reserved address: {ip_str}"
+        if ip.is_unspecified:
+            return False, f"Blocked unspecified address: {ip_str}"
+
+    return True, "OK"

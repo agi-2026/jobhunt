@@ -9,11 +9,40 @@ Open: http://localhost:8765
 import http.server
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+SCRIPTS_DIR = WORKSPACE / "scripts"
+if SCRIPTS_DIR.exists() and str(SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR))
+fallback_scripts = REPO_ROOT / "workspace" / "scripts"
+if fallback_scripts.exists() and str(fallback_scripts) not in sys.path:
+    sys.path.append(str(fallback_scripts))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not url or not url.startswith(("http://", "https://")):
+            return False, "Invalid scheme"
+        import ipaddress, socket, urllib.parse
+        try:
+            parsed = urllib.parse.urlparse(url)
+            host = (parsed.hostname or "").strip("[]").lower()
+            if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+                return False, "Invalid URL (loopback/internal blocked)"
+            for _, _, _, _, sockaddr in socket.getaddrinfo(host, None):
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local:
+                    return False, "Invalid URL (loopback/internal blocked)"
+            return True, "OK"
+        except Exception as e:
+            return False, str(e)
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
@@ -29,9 +58,25 @@ H1B_REG_DEADLINE = datetime(2026, 3, 19, 12, 0) # Final registration deadline
 NO_AUTO_COMPANIES = {"openai", "databricks", "waymo"}
 
 
+def sanitize_field(val: str) -> str:
+    """Sanitize strings against newlines, control characters, pipes, and em-dashes for Markdown safety."""
+    if not val:
+        return ""
+    s = re.sub(r"[\r\n\t\x00-\x1f\x7f-\x9f]", " ", str(val))
+    s = s.replace("|", "/").replace("—", "-")
+    return s.strip()
+
+
+def sanitize_url(url: str) -> str:
+    """Sanitize URL against newline and CRLF injection."""
+    if not url:
+        return ""
+    return re.sub(r"[\r\n\t\x00-\x1f\x7f-\x9f\s]", "", str(url))
+
+
 def canonicalize_url(url: str) -> str:
     """Normalize URLs for consistent matching across files."""
-    u = (url or "").strip()
+    u = sanitize_url(url)
     if not u:
         return ""
     u = u.rstrip("/")
@@ -335,7 +380,9 @@ def count_dedup_applied() -> int:
 
 def mark_as_applied(url: str, company: str = "", title: str = "") -> dict:
     """Mark a job as applied: update queue, dedup, and tracker."""
-    url = url.strip()
+    url = sanitize_url(url)
+    company = sanitize_field(company)
+    title = sanitize_field(title)
     if not url:
         return {"ok": False, "error": "URL is required"}
 
@@ -415,7 +462,9 @@ def mark_as_applied(url: str, company: str = "", title: str = "") -> dict:
 
 def delete_from_queue(url: str, company: str = "", title: str = "") -> dict:
     """Delete a job from queue and add to dedup as SKIPPED to prevent re-discovery."""
-    url = url.strip()
+    url = sanitize_url(url)
+    company = sanitize_field(company)
+    title = sanitize_field(title)
     if not url:
         return {"ok": False, "error": "URL is required"}
 
@@ -476,6 +525,12 @@ def delete_from_queue(url: str, company: str = "", title: str = "") -> dict:
 
 def update_stage(search_term: str, new_stage: str, url: str = "", company: str = "", title: str = "") -> dict:
     """Update a job's stage in the tracker. Searches by company name or URL."""
+    search_term = sanitize_field(search_term)
+    new_stage = sanitize_field(new_stage)
+    url = sanitize_url(url)
+    company = sanitize_field(company)
+    title = sanitize_field(title)
+
     valid_stages = ["Applied", "Phone Screen", "Technical Interview",
                     "Take Home", "Onsite/Final", "Offer", "Rejected"]
     if new_stage not in valid_stages:
@@ -614,9 +669,10 @@ def extract_from_url(url: str) -> dict:
 def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
-    url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    url = sanitize_url(url).rstrip("/")
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Invalid URL ({reason})"}
 
     info = extract_from_url(url)
     company = info["company"]
@@ -1278,6 +1334,19 @@ setInterval(() => {
 class DashboardHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
+
+    def do_HEAD(self):
+        if self.path == "/" or self.path == "/index.html":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+        elif self.path == "/api/data":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
