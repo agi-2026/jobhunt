@@ -7,13 +7,48 @@ Open: http://localhost:8765
 """
 
 import http.server
+import ipaddress
 import json
+import os
 import re
+import socket
+import sys
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_SCRIPTS = REPO_ROOT / "workspace" / "scripts"
+SCRIPTS_DIR = WORKSPACE / "scripts"
+
+for p in (str(SCRIPTS_DIR), str(WORKSPACE_SCRIPTS)):
+    if p not in sys.path:
+        sys.path.append(p)
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not url or not isinstance(url, str):
+            return False, "Invalid URL"
+        u = url.strip()
+        parsed = urllib.parse.urlparse(u)
+        if parsed.scheme not in ("http", "https"):
+            return False, "Invalid scheme"
+        hostname = parsed.hostname
+        if not hostname or hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"):
+            return False, "Loopback/internal address blocked"
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+            for res in addr_info:
+                ip = ipaddress.ip_address(res[4][0])
+                if ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                    return False, f"Internal/private IP blocked ({ip})"
+        except Exception as e:
+            return False, f"Resolution failed: {e}"
+        return True, "URL is safe"
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
@@ -577,9 +612,6 @@ def update_stage(search_term: str, new_stage: str, url: str = "", company: str =
     return {"ok": True, "message": f"{match['company']} — {match['title']}: {old_stage} -> {new_stage}"}
 
 
-SCRIPTS_DIR = WORKSPACE / "scripts"
-
-
 def extract_from_url(url: str) -> dict:
     """Extract company and ATS type from a job URL."""
     info = {"company": "", "title": "", "ats": ""}
@@ -615,8 +647,9 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    safe, reason = is_safe_url(url)
+    if not safe:
+        return {"ok": False, "error": f"Invalid URL ({reason})"}
 
     info = extract_from_url(url)
     company = info["company"]
