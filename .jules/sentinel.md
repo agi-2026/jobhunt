@@ -1,0 +1,4 @@
+## 2026-07-20 - SSRF Prevention and TLS Certificate Verification Enforcements
+**Vulnerability:** Several Python scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`, `search-vc-boards.py`) and the `add_job` endpoint in `dashboard/server.py` lacked SSRF validation and disabled TLS certificate verification via `ssl.CERT_NONE` and `check_hostname = False`.
+**Learning:** URL check routines in scraping/queue pipelines often disable SSL verification for temporary local testing and forget to validate hostname IP resolution, allowing loopback (`127.0.0.1`), private RFC 1918 IPs, and AWS IMDS (`169.254.169.254`) targeting.
+**Prevention:** Consolidate central URL safety checking in `queue_utils.py` using `socket.getaddrinfo` and `ipaddress` (`is_safe_url`), enforcing scheme and IP blacklisting while using `ssl.create_default_context()` without `CERT_NONE` overrides.
