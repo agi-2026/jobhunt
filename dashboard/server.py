@@ -577,7 +577,40 @@ def update_stage(search_term: str, new_stage: str, url: str = "", company: str =
     return {"ok": True, "message": f"{match['company']} — {match['title']}: {old_stage} -> {new_stage}"}
 
 
+import sys
+
 SCRIPTS_DIR = WORKSPACE / "scripts"
+if not SCRIPTS_DIR.exists():
+    REPO_ROOT = Path(__file__).resolve().parent.parent
+    SCRIPTS_DIR = REPO_ROOT / "workspace" / "scripts"
+
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not url or not isinstance(url, str):
+            return False, "Invalid or empty URL"
+        parsed = urlparse(url.strip())
+        if parsed.scheme.lower() not in ("http", "https"):
+            return False, f"Unsupported scheme: {parsed.scheme}"
+        hostname = parsed.hostname
+        if not hostname or hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False, "Invalid URL (loopback/internal blocked)"
+        try:
+            for item in socket.getaddrinfo(hostname, None):
+                ip = ipaddress.ip_address(item[4][0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                    return False, f"Invalid URL (internal IP {ip} blocked)"
+        except Exception:
+            return False, "Hostname resolution failed"
+        return True, "Safe URL"
 
 
 def extract_from_url(url: str) -> dict:
@@ -617,6 +650,10 @@ def add_job(url: str, destination: str = "queue") -> dict:
     url = url.strip().rstrip("/")
     if not url.startswith("http"):
         return {"ok": False, "error": "URL must start with http"}
+
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Invalid URL ({reason})"}
 
     info = extract_from_url(url)
     company = info["company"]

@@ -76,8 +76,6 @@ def parse_queue():
 def check_url(url, timeout=15):
     """Check if URL points to a live job posting. Returns (status, reason)."""
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
