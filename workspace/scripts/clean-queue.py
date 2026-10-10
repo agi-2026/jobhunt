@@ -9,8 +9,6 @@ def check_url(url, timeout=10):
     if not url.startswith("http"):
         url = "https://" + url
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, method='HEAD', headers={
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
     })

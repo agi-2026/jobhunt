@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,44 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety for SSRF prevention. Returns (is_safe, reason)."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid or empty URL"
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported protocol scheme: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False, "Unable to resolve hostname"
+
+        for item in addr_info:
+            ip_str = item[4][0]
+            ip = ipaddress.ip_address(ip_str)
+
+            if ip.is_loopback or ip.is_unspecified:
+                return False, "Invalid URL (loopback/internal blocked)"
+            if ip.is_link_local:
+                return False, f"Invalid URL (link-local IP {ip} blocked)"
+            if ip.is_private:
+                return False, f"Invalid URL (private IP {ip} blocked)"
+            if ip.is_reserved or ip.is_multicast:
+                return False, f"Invalid URL (reserved/multicast IP {ip} blocked)"
+    except socket.gaierror:
+        return False, "Hostname resolution failed"
+    except ValueError:
+        return False, "Invalid IP address format"
+
+    return True, "Safe URL"

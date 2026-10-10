@@ -6,16 +6,44 @@ Usage: python3 scripts/preflight-check.py "<url>"
 Output: ALIVE <reason> or DEAD <reason>
 """
 
-import sys
-import re
 import json
-import urllib.request
-import urllib.error
+import os
+import re
 import ssl
+import sys
+import urllib.error
+import urllib.request
+
+SCRIPTS_DIR = os.path.dirname(os.path.realpath(__file__))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not url or not isinstance(url, str):
+            return False, "Invalid URL"
+        parsed = urlparse(url.strip())
+        if parsed.scheme.lower() not in ("http", "https"):
+            return False, f"Unsupported scheme {parsed.scheme}"
+        hostname = parsed.hostname
+        if not hostname or hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False, "loopback/internal blocked"
+        try:
+            for item in socket.getaddrinfo(hostname, None):
+                ip = ipaddress.ip_address(item[4][0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                    return False, f"internal IP {ip} blocked"
+        except Exception:
+            return False, "Resolution error"
+        return True, "Safe URL"
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -167,6 +195,10 @@ def check_url_html(url, timeout=10):
 
 def check_url(url, timeout=10):
     """Check URL: try ATS API first, fall back to HTML check."""
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return "DEAD", f"Invalid URL ({reason})"
+
     # Try ATS-specific API checks (fast, reliable, no JS needed)
     if "greenhouse.io" in url:
         result = check_greenhouse_api(url)
