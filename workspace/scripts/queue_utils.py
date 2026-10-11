@@ -2,13 +2,61 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety against SSRF attacks (scheme and IP restrictions)."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL format"
+
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid scheme '{parsed.scheme}'; only http/https allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed: {e}"
+    except Exception as e:
+        return False, f"Host resolution failed: {e}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Blocked loopback IP ({ip_str})"
+        if ip.is_link_local:
+            return False, f"Blocked link-local IP ({ip_str})"
+        if ip.is_private:
+            return False, f"Blocked private network IP ({ip_str})"
+        if ip.is_multicast:
+            return False, f"Blocked multicast IP ({ip_str})"
+        if ip.is_unspecified:
+            return False, f"Blocked unspecified IP ({ip_str})"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
@@ -146,4 +194,3 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
             out = [j for j in out if not any(p in j.get("url", "") for p in all_known)]
 
     return out
-
