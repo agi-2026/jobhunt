@@ -2,13 +2,70 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """
+    Validate that a URL uses http/https scheme and does not resolve to
+    loopback, private, link-local (e.g. AWS metadata), or internal networks.
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Empty or invalid URL type"
+
+    try:
+        parsed = urlparse(url.strip())
+    except Exception as e:
+        return False, f"URL parsing error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    # Reject explicit localhost string matches
+    if hostname.lower() in ("localhost", "localhost.localdomain"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    port = parsed.port or (80 if parsed.scheme.lower() == "http" else 443)
+
+    try:
+        # Resolve hostname to all associated IP addresses (IPv4 & IPv6)
+        addr_info = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed for {hostname}: {e}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Invalid URL (loopback/internal blocked: {ip_str})"
+        if ip.is_link_local:
+            return False, f"Invalid URL (link-local blocked: {ip_str})"
+        if ip.is_private:
+            return False, f"Invalid URL (private network blocked: {ip_str})"
+        if ip.is_multicast:
+            return False, f"Invalid URL (multicast blocked: {ip_str})"
+        if ip.is_reserved:
+            return False, f"Invalid URL (reserved range blocked: {ip_str})"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
