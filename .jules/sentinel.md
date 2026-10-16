@@ -1,0 +1,4 @@
+## 2026-07-20 - SSL Certificate Verification Bypass & SSRF in Preflight Checks
+**Vulnerability:** Preflight URL check (`preflight-check.py`) globally disabled SSL certificate verification (`ssl.CERT_NONE` and `check_hostname = False`) and accepted arbitrary URL schemes without validating target IP addresses.
+**Learning:** URL preflight utilities were accepting unvalidated user/queue URLs, exposing the server to MITM risks during HTTPS requests and SSRF attacks against internal network resources (loopback, private subnet, AWS IMDS metadata endpoints).
+**Prevention:** Always restrict URL schemes to `http`/`https`, resolve hostnames to IP addresses before initiating connections to reject internal/private/link-local/loopback destinations using `is_safe_url`, and rely on standard default SSL context verification.
