@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -129,6 +132,55 @@ def parse_queue_sections(content: str, no_auto_companies=None):
 def read_queue_sections(queue_path: str, lock_path: str, no_auto_companies=None):
     content = read_queue_content(queue_path, lock_path)
     return parse_queue_sections(content, no_auto_companies=no_auto_companies)
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate that a URL uses http/https scheme and does not resolve to internal/loopback/private IP addresses."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL format"
+
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}' (only http/https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    if hostname.lower() in ("localhost", "0.0.0.0"):
+        return False, f"Blocked hostname '{hostname}'"
+
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed for {hostname}: {e}"
+    except Exception as e:
+        return False, f"Address resolution failed: {e}"
+
+    if not addr_info:
+        return False, f"No IP addresses found for {hostname}"
+
+    for res in addr_info:
+        ip_str = res[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address returned: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"IP {ip} is loopback address"
+        if ip.is_link_local:
+            return False, f"IP {ip} is link-local address"
+        if ip.is_private:
+            return False, f"IP {ip} is private/internal address"
+        if ip.is_multicast:
+            return False, f"IP {ip} is multicast address"
+        if ip.is_unspecified:
+            return False, f"IP {ip} is unspecified address"
+
+    return True, "URL is safe"
 
 
 def filter_jobs(jobs, actionable_only=False, ats_filter=None):
