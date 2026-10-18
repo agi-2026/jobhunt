@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,55 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """
+    Validate that a URL uses http/https scheme and does not resolve to loopback,
+    private, link-local (e.g. AWS metadata 169.254.169.254), or multicast IP addresses.
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url:
+        return False, "URL is empty"
+
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL structure: {str(e)}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid scheme: {parsed.scheme or 'none'} (only http and https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Invalid URL hostname"
+
+    if hostname.lower() == "localhost":
+        return False, "Loopback/internal hostname blocked (localhost)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False, "Unable to resolve hostname"
+
+        for item in addr_info:
+            ip_str = item[4][0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if ip.is_loopback:
+                    return False, f"Loopback address blocked ({ip_str})"
+                if ip.is_link_local:
+                    return False, f"Link-local address blocked ({ip_str})"
+                if ip.is_private:
+                    return False, f"Private network address blocked ({ip_str})"
+                if ip.is_multicast:
+                    return False, f"Multicast address blocked ({ip_str})"
+                if ip.is_reserved:
+                    return False, f"Reserved address blocked ({ip_str})"
+            except ValueError:
+                return False, f"Invalid IP address format ({ip_str})"
+    except socket.gaierror:
+        return False, f"Failed to resolve hostname '{hostname}'"
+    except Exception as e:
+        return False, f"Error validating URL: {str(e)}"
+
+    return True, "URL is safe"
