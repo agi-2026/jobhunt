@@ -613,7 +613,21 @@ def extract_from_url(url: str) -> dict:
 
 def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
+    import sys
     import subprocess
+
+    scripts_path = str(WORKSPACE / "scripts")
+    if scripts_path not in sys.path:
+        sys.path.append(scripts_path)
+
+    try:
+        from queue_utils import is_safe_url
+        safe, reason = is_safe_url(url)
+        if not safe:
+            return {"ok": False, "error": f"Invalid or unsafe URL ({reason})"}
+    except ImportError:
+        pass
+
     url = url.strip().rstrip("/")
     if not url.startswith("http"):
         return {"ok": False, "error": "URL must start with http"}

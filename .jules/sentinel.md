@@ -1,0 +1,4 @@
+## 2026-07-20 - Global SSL Context Bypass & Unchecked Outbound URLs (SSRF)
+**Vulnerability:** Utility scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`) disabled SSL/TLS certificate validation (`ssl.CERT_NONE` / `check_hostname = False`) and fetched user/queue URLs without validating target hostnames/IP addresses.
+**Learning:** Legacy development patterns often introduce global SSL verification overrides to bypass local certificate errors during testing, exposing outbound requests to MITM attacks and SSRF risks.
+**Prevention:** Consolidate URL validation into a central helper (`is_safe_url` in `queue_utils.py`) enforcing `http`/`https` schemes and resolving hostnames via `socket.getaddrinfo` to block loopback, private RFC 1918, link-local, and cloud metadata IP addresses. Standardize on `ssl.create_default_context()` without disabling verification.
