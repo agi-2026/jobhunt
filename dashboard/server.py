@@ -9,11 +9,54 @@ Open: http://localhost:8765
 import http.server
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_SEARCH_PATHS = [
+    WORKSPACE / "scripts",
+    REPO_ROOT / "workspace" / "scripts",
+    REPO_ROOT / "scripts",
+]
+for p in SCRIPTS_SEARCH_PATHS:
+    if p.exists() and str(p) not in sys.path:
+        sys.path.append(str(p))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not url or not isinstance(url, str):
+            return False, "Empty or invalid URL"
+        url = url.strip()
+        try:
+            parsed = urlparse(url)
+        except Exception as e:
+            return False, f"Invalid URL structure: {e}"
+        if parsed.scheme.lower() not in ("http", "https"):
+            return False, f"Invalid scheme: {parsed.scheme}"
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Missing hostname in URL"
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+        except Exception as e:
+            return False, f"Error resolving hostname: {e}"
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            try:
+                ip = ipaddress.ip_address(sockaddr[0])
+            except ValueError:
+                return False, "Invalid IP address"
+            if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                return False, f"Blocked internal/reserved IP: {sockaddr[0]}"
+        return True, "Fallback safety check passed"
 OPENCLAW_DIR = Path.home() / ".openclaw"
 QUEUE_FILE = WORKSPACE / "job-queue.md"
 TRACKER_FILE = WORKSPACE / "job-tracker.md"
@@ -617,6 +660,10 @@ def add_job(url: str, destination: str = "queue") -> dict:
     url = url.strip().rstrip("/")
     if not url.startswith("http"):
         return {"ok": False, "error": "URL must start with http"}
+
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Security check failed: {reason}"}
 
     info = extract_from_url(url)
     company = info["company"]
