@@ -131,6 +131,51 @@ def read_queue_sections(queue_path: str, lock_path: str, no_auto_companies=None)
     return parse_queue_sections(content, no_auto_companies=no_auto_companies)
 
 
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety to prevent SSRF and non-HTTP scheme exploits.
+
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL input"
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False, f"Unsupported scheme: {parsed.scheme}"
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Missing hostname"
+        if hostname.lower() in ("localhost", "0.0.0.0"):
+            return False, f"Blocked loopback hostname: {hostname}"
+
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
+            return False, "Could not resolve hostname"
+
+        for family, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Loopback address blocked ({ip_str})"
+            if ip.is_link_local:
+                return False, f"Link-local address blocked ({ip_str})"
+            if ip.is_private:
+                return False, f"Private IP address blocked ({ip_str})"
+            if ip.is_multicast:
+                return False, f"Multicast address blocked ({ip_str})"
+            if ip.is_reserved:
+                return False, f"Reserved IP address blocked ({ip_str})"
+
+        return True, "URL is safe"
+    except Exception as e:
+        return False, f"Validation error: {e}"
+
+
 def filter_jobs(jobs, actionable_only=False, ats_filter=None):
     out = list(jobs)
     if actionable_only:
