@@ -2,13 +2,72 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety to prevent SSRF and non-http protocol misuse.
+
+    Returns (is_safe, reason).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Empty or invalid URL"
+
+    url = url.strip()
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme: '{parsed.scheme}'. Only http and https are allowed."
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    hostname_lower = hostname.lower().strip("[]")
+    if hostname_lower in ("localhost", "0.0.0.0", "127.0.0.1", "::1"):
+        return False, f"Blocked host: {hostname}"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"Could not resolve hostname '{hostname}': {e}"
+    except Exception as e:
+        return False, f"DNS resolution failed: {e}"
+
+    if not addr_info:
+        return False, f"No IP addresses resolved for hostname '{hostname}'"
+
+    for item in addr_info:
+        ip_str = item[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid resolved IP address: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Blocked loopback IP: {ip_str}"
+        if ip.is_link_local:
+            return False, f"Blocked link-local/metadata IP: {ip_str}"
+        if ip.is_private:
+            return False, f"Blocked private IP: {ip_str}"
+        if ip.is_multicast:
+            return False, f"Blocked multicast IP: {ip_str}"
+        if ip.is_reserved or ip.is_unspecified:
+            return False, f"Blocked reserved/unspecified IP: {ip_str}"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:

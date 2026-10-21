@@ -611,12 +611,34 @@ def extract_from_url(url: str) -> dict:
     return info
 
 
+def _check_url_safe(url: str) -> tuple:
+    """Helper to check if URL is safe, attempting import of is_safe_url from queue_utils."""
+    import sys
+    try:
+        sys.path.append(str(WORKSPACE / "scripts"))
+        repo_scripts = Path(__file__).resolve().parent.parent / "workspace" / "scripts"
+        if repo_scripts.exists():
+            sys.path.append(str(repo_scripts))
+        from queue_utils import is_safe_url
+        return is_safe_url(url)
+    except Exception:
+        # Fallback security check if import fails
+        if not url.startswith(("http://", "https://")):
+            return False, "URL must start with http:// or https://"
+        for blocked in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"):
+            if blocked in url.lower():
+                return False, f"Blocked hostname/IP: {blocked}"
+        return True, "Safe"
+
+
 def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+
+    is_safe, reason = _check_url_safe(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Invalid URL safety check: {reason}"}
 
     info = extract_from_url(url)
     company = info["company"]
