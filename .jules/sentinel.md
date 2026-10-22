@@ -1,0 +1,4 @@
+## 2026-03-10 - Shared SSRF Protection and TLS Verification Enforcement
+**Vulnerability:** Several Python scripts (`preflight-check.py`, `batch-preflight.py`, `clean-queue.py`, `validate-queue-urls.py`, and `dashboard/server.py`) either completely disabled SSL/TLS certificate verification (`ssl.CERT_NONE` / `check_hostname = False`) or accepted user-supplied job URLs without SSRF validation, allowing internal network probing and MITM risks.
+**Learning:** Utilities that make outbound HTTP requests in autonomous agents must validate hostnames against loopback, private, link-local, and non-routable IP ranges after DNS resolution (`socket.getaddrinfo`), and must not globally disable SSL certificate verification.
+**Prevention:** Always centralize URL safety logic in a shared utility (`is_safe_url` in `queue_utils.py`) that enforces valid schemes (`http`/`https`), performs IP resolution validation using `ipaddress`, and maintains strict TLS verification defaults.

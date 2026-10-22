@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,56 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate if URL is safe to fetch (SSRF protection).
+
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL format"
+
+    parsed = urllib.parse.urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Unsupported scheme: {scheme or 'none'}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in ("localhost", "0.0.0.0", "::1", "[::1]"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed: {e}"
+    except Exception as e:
+        return False, f"Resolution error: {e}"
+
+    if not addr_info:
+        return False, "No IP address found for hostname"
+
+    for family, socktype, proto, canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address: {ip_str}"
+
+        if ip.is_loopback:
+            return False, "Invalid URL (loopback/internal blocked)"
+        if ip.is_link_local:
+            return False, "Invalid URL (link-local blocked)"
+        if ip.is_private:
+            return False, "Invalid URL (private network blocked)"
+        if ip.is_multicast:
+            return False, "Invalid URL (multicast blocked)"
+        if ip.is_reserved:
+            return False, "Invalid URL (reserved address blocked)"
+        if ip.is_unspecified:
+            return False, "Invalid URL (unspecified address blocked)"
+
+    return True, "URL is safe"
