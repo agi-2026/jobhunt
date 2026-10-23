@@ -2,13 +2,70 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL for scheme and IP safety to prevent SSRF attacks.
+    Returns (is_safe: bool, reason: str)."""
+    if not url or not isinstance(url, str):
+        return False, "Empty or non-string URL"
+
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, f"Invalid scheme '{parsed.scheme}': only http and https allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    # Block explicit localhost names
+    if hostname.lower() in ("localhost", "localhost.localdomain"):
+        return False, "Loopback domain blocked"
+
+    # Resolve IP addresses for the hostname
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed for '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Resolution error for '{hostname}': {e}"
+
+    if not addr_info:
+        return False, f"No IP addresses found for '{hostname}'"
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address returned: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Loopback address blocked ({ip_str})"
+        if ip.is_link_local:
+            return False, f"Link-local address blocked ({ip_str})"
+        if ip.is_private:
+            return False, f"Private IP address blocked ({ip_str})"
+        if ip.is_multicast:
+            return False, f"Multicast address blocked ({ip_str})"
+        if ip.is_reserved or ip.is_unspecified:
+            return False, f"Reserved/unspecified IP address blocked ({ip_str})"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
