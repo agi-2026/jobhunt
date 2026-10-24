@@ -8,9 +8,25 @@ Open: http://localhost:8765
 
 import http.server
 import json
+import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Add scripts directory to path for imports
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR_LOCAL = REPO_ROOT / "workspace" / "scripts"
+if str(SCRIPTS_DIR_LOCAL) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR_LOCAL))
+
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not (url or "").startswith(("http://", "https://")):
+            return False, "Invalid scheme: only http and https are allowed"
+        return True, "Safe"
 
 PORT = 8765
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
@@ -615,8 +631,9 @@ def add_job(url: str, destination: str = "queue") -> dict:
     """Add a job URL to queue or mark as applied. Runs preflight + add-to-queue."""
     import subprocess
     url = url.strip().rstrip("/")
-    if not url.startswith("http"):
-        return {"ok": False, "error": "URL must start with http"}
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return {"ok": False, "error": f"Invalid URL ({reason})"}
 
     info = extract_from_url(url)
     company = info["company"]
