@@ -23,7 +23,7 @@ import urllib.request
 import urllib.error
 import ssl
 import subprocess
-from queue_utils import filter_jobs, read_queue_sections
+from queue_utils import filter_jobs, is_safe_url, read_queue_sections
 
 QUEUE_PATH = os.path.expanduser("~/.openclaw/workspace/job-queue.md")
 SCRIPTS_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -31,8 +31,6 @@ LOCK_PATH = os.path.expanduser("~/.openclaw/workspace/.queue.lock")
 
 # SSL context for API calls
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -42,6 +40,9 @@ HEADERS = {
 
 def api_get(url, timeout=10):
     """Make a GET request and return (status_code, body_json_or_none)."""
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return -1, None
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         resp = urllib.request.urlopen(req, timeout=timeout, context=CTX)
@@ -227,6 +228,9 @@ def detect_ats(url):
 
 def check_url(url):
     """Route to the correct ATS checker."""
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return "DEAD", reason
     ats = detect_ats(url)
     if ats == "ashby":
         return check_ashby(url)
