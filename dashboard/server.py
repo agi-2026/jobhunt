@@ -680,21 +680,41 @@ def get_skip_list() -> list:
         return []
 
 
+def _sanitize_input_str(val: str) -> str:
+    """Sanitize user input string by stripping control characters and HTML tags."""
+    if not val:
+        return ""
+    # Strip HTML tags
+    cleaned = re.sub(r'<[^>]*>', '', str(val))
+    # Strip newline and non-printable control characters (keep standard printable)
+    cleaned = re.sub(r'[\r\n\t\x00-\x1f\x7f-\x9f]', ' ', cleaned)
+    # Collapse multiple spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned.strip()
+
+
 def add_to_skip_list(name: str, reason: str, category: str = "manual") -> dict:
     """Add a company to the skip list."""
-    name = name.strip()
+    name = _sanitize_input_str(name)
     if not name:
         return {"ok": False, "error": "Company name required"}
+
+    reason = _sanitize_input_str(reason) or "Manually added"
+    valid_categories = {"csp", "limit", "technical", "captcha", "manual"}
+    category = category.lower().strip() if category else "manual"
+    if category not in valid_categories:
+        category = "manual"
+
     try:
         with open(SKIP_LIST_FILE, 'r') as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {"companies": []}
     # Check duplicate
-    for c in data["companies"]:
-        if c["name"].lower() == name.lower():
+    for c in data.get("companies", []):
+        if c.get("name", "").lower() == name.lower():
             return {"ok": False, "error": f"{name} already in skip list"}
-    data["companies"].append({"name": name, "reason": reason or "Manually added", "category": category})
+    data.setdefault("companies", []).append({"name": name, "reason": reason, "category": category})
     with open(SKIP_LIST_FILE, 'w') as f:
         json.dump(data, f, indent=2)
     return {"ok": True, "message": f"Added {name} to skip list"}
@@ -702,13 +722,17 @@ def add_to_skip_list(name: str, reason: str, category: str = "manual") -> dict:
 
 def remove_from_skip_list(name: str) -> dict:
     """Remove a company from the skip list."""
+    name = _sanitize_input_str(name)
+    if not name:
+        return {"ok": False, "error": "Company name required"}
+
     try:
         with open(SKIP_LIST_FILE, 'r') as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"ok": False, "error": "Skip list not found"}
     original = len(data.get("companies", []))
-    data["companies"] = [c for c in data.get("companies", []) if c["name"].lower() != name.lower()]
+    data["companies"] = [c for c in data.get("companies", []) if c.get("name", "").lower() != name.lower()]
     if len(data["companies"]) == original:
         return {"ok": False, "error": f"{name} not found in skip list"}
     with open(SKIP_LIST_FILE, 'w') as f:
