@@ -24,6 +24,12 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    is_safe_url = None
+
 # Already tracked companies (skip these)
 ALREADY_TRACKED = {
     # Ashby
@@ -207,6 +213,17 @@ def probe_lever(slug, timeout=8):
 
 def detect_company(company_name):
     """Detect which ATS a company uses. Returns dict with results."""
+    if is_safe_url and (company_name.startswith("http://") or company_name.startswith("https://")):
+        safe, reason = is_safe_url(company_name)
+        if not safe:
+            return {
+                'company': company_name,
+                'ats': None,
+                'slug': None,
+                'job_count': 0,
+                'already_tracked': False,
+            }
+
     slugs = generate_slugs(company_name)
     result = {
         'company': company_name,
