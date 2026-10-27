@@ -9,9 +9,17 @@ Output: ALIVE <reason> or DEAD <reason>
 import sys
 import re
 import json
+import os
 import urllib.request
 import urllib.error
 import ssl
+
+# Import shared queue_utils for SSRF safety checks
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    is_safe_url = None
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
@@ -167,6 +175,11 @@ def check_url_html(url, timeout=10):
 
 def check_url(url, timeout=10):
     """Check URL: try ATS API first, fall back to HTML check."""
+    if is_safe_url:
+        safe, reason = is_safe_url(url)
+        if not safe:
+            return "DEAD", f"Invalid URL ({reason})"
+
     # Try ATS-specific API checks (fast, reliable, no JS needed)
     if "greenhouse.io" in url:
         result = check_greenhouse_api(url)

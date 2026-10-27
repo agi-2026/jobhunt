@@ -2,13 +2,58 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL safety against SSRF vulnerabilities (loopback, private IPs, IMDS, non-http schemes)."""
+    if not url or not isinstance(url, str):
+        return False, "URL is empty or invalid type"
+    url = url.strip()
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid URL scheme: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL missing hostname"
+
+    hostname_clean = hostname.lower().strip()
+    if hostname_clean in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"):
+        return False, f"Blocked loopback hostname: {hostname_clean}"
+
+    try:
+        addrs = socket.getaddrinfo(hostname, None)
+        for addr in addrs:
+            ip_str = addr[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Resolves to loopback address: {ip_str}"
+            if ip.is_link_local:
+                return False, f"Resolves to link-local address: {ip_str}"
+            if ip.is_private:
+                return False, f"Resolves to private address: {ip_str}"
+            if ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+                return False, f"Resolves to restricted address: {ip_str}"
+    except socket.gaierror as e:
+        return False, f"Failed to resolve hostname: {e}"
+    except Exception as e:
+        return False, f"Validation error: {e}"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
