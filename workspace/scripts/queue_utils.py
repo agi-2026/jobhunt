@@ -2,13 +2,55 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL scheme and resolve IP addresses to block SSRF targets."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL format"
+
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    # Fast path for known loopback text
+    if hostname.lower() in ("localhost", "0.0.0.0"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed for {hostname}: {e}"
+
+    for entry in addr_info:
+        ip_str = entry[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid resolved IP address: {ip_str}"
+
+        if ip.is_loopback or ip.is_unspecified:
+            return False, f"Invalid URL (loopback/internal blocked: {ip_str})"
+        if ip.is_link_local:
+            return False, f"Invalid URL (link-local blocked: {ip_str})"
+        if ip.is_private or ip.is_reserved:
+            return False, f"Invalid URL (private network blocked: {ip_str})"
+
+    return True, "URL safety check passed"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
