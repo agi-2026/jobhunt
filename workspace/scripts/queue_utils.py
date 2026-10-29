@@ -2,13 +2,61 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "greenhouse": ["greenhouse.io", "gh_jid="],
     "lever": ["lever.co"],
 }
+
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL for SSRF protection: http/https scheme, host must not resolve to internal/private/loopback/link-local IPs."""
+    if not url or not isinstance(url, str):
+        return False, "Invalid URL string"
+    try:
+        parsed = urlparse(url.strip())
+    except Exception as e:
+        return False, f"Invalid URL structure: {e}"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, f"Unsupported scheme: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"DNS resolution failed: {e}"
+    except Exception as e:
+        return False, f"Resolution error: {e}"
+
+    if not addr_info:
+        return False, "Could not resolve hostname"
+
+    for family, socktype, proto, canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback:
+            return False, f"Invalid URL (loopback/internal blocked: {ip_str})"
+        if ip.is_link_local:
+            return False, f"Invalid URL (link-local blocked: {ip_str})"
+        if ip.is_private:
+            return False, f"Invalid URL (private network blocked: {ip_str})"
+        if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return False, f"Invalid URL (restricted IP blocked: {ip_str})"
+
+    return True, "URL is safe"
 
 
 def read_queue_content(queue_path: str, lock_path: str) -> str:
