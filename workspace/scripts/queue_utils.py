@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,54 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple:
+    """Validate URL for safety against SSRF and unsupported schemes.
+    Returns (is_safe: bool, reason: str).
+    """
+    if not url or not isinstance(url, str):
+        return False, "Invalid or empty URL"
+
+    try:
+        parsed = urlparse(url.strip())
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Unsupported scheme '{parsed.scheme}' (only http and https allowed)"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "Missing hostname in URL"
+
+    hostname_lower = hostname.lower()
+    if hostname_lower in ("localhost", "0.0.0.0", "::1"):
+        return False, "Invalid URL (loopback/internal blocked)"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        return False, f"Failed to resolve host '{hostname}': {e}"
+    except Exception as e:
+        return False, f"DNS resolution error for '{hostname}': {e}"
+
+    if not addr_info:
+        return False, f"Could not resolve host '{hostname}'"
+
+    for family, socktype, proto, canonname, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"Invalid IP address resolved: {ip_str}"
+
+        if ip.is_loopback or ip.is_unspecified:
+            return False, "Invalid URL (loopback/internal blocked)"
+        if ip.is_link_local:
+            return False, "Invalid URL (link-local blocked)"
+        if ip.is_private:
+            return False, "Invalid URL (private IP blocked)"
+        if ip.is_multicast or ip.is_reserved:
+            return False, "Invalid URL (reserved IP blocked)"
+
+    return True, "URL is safe"
