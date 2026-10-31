@@ -6,6 +6,7 @@ Usage: python3 scripts/preflight-check.py "<url>"
 Output: ALIVE <reason> or DEAD <reason>
 """
 
+import os
 import sys
 import re
 import json
@@ -13,9 +14,17 @@ import urllib.request
 import urllib.error
 import ssl
 
+# Import is_safe_url from queue_utils
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+try:
+    from queue_utils import is_safe_url
+except ImportError:
+    def is_safe_url(url: str) -> tuple[bool, str]:
+        if not (url or "").startswith(("http://", "https://")):
+            return False, "Invalid scheme: only http and https are allowed"
+        return True, "Safe"
+
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -167,6 +176,10 @@ def check_url_html(url, timeout=10):
 
 def check_url(url, timeout=10):
     """Check URL: try ATS API first, fall back to HTML check."""
+    is_safe, reason = is_safe_url(url)
+    if not is_safe:
+        return "DEAD", f"Invalid URL ({reason})"
+
     # Try ATS-specific API checks (fast, reliable, no JS needed)
     if "greenhouse.io" in url:
         result = check_greenhouse_api(url)
