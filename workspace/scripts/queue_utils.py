@@ -2,7 +2,10 @@
 """Shared queue parsing/filter helpers for JobHunt scripts."""
 
 import fcntl
+import ipaddress
 import re
+import socket
+import urllib.parse
 
 ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
@@ -147,3 +150,51 @@ def filter_jobs(jobs, actionable_only=False, ats_filter=None):
 
     return out
 
+
+def is_safe_url(url: str) -> tuple[bool, str]:
+    """Validate URL to protect against SSRF and unsupported schemes."""
+    if not url or not isinstance(url, str):
+        return False, "Empty or invalid URL"
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except Exception as e:
+        return False, f"URL parse failure: {e}"
+
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False, f"Invalid scheme '{parsed.scheme}'; only http/https allowed"
+
+    host = parsed.hostname
+    if not host:
+        return False, "Missing hostname"
+
+    # Block well-known loopback hostnames directly
+    if host.lower() in ("localhost", "ip6-localhost", "ip6-loopback"):
+        return False, f"Access to loopback address '{host}' is blocked"
+
+    try:
+        addr_infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        return False, f"Hostname resolution error: {e}"
+    except Exception as e:
+        return False, f"DNS resolution error: {e}"
+
+    if not addr_infos:
+        return False, f"Could not resolve host: {host}"
+
+    for addr_info in addr_infos:
+        sockaddr = addr_info[4]
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"Loopback address '{ip_str}' is blocked"
+            if ip.is_link_local:
+                return False, f"Link-local address '{ip_str}' is blocked"
+            if ip.is_private:
+                return False, f"Private address '{ip_str}' is blocked"
+            if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                return False, f"Restricted address '{ip_str}' is blocked"
+        except ValueError:
+            return False, f"Invalid IP representation: {ip_str}"
+
+    return True, "OK"
